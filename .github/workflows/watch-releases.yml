@@ -10,7 +10,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+  issues: write
 
 jobs:
   watch:
@@ -25,15 +26,29 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Review new GitHub Releases
+        id: review
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           GH_TOKEN: ${{ github.token }}
+          NOTIFY_LOGINS: ${{ vars.NOTIFY_LOGINS }}
         run: python .github/scripts/watch_releases.py
-      - name: Commit reports
+      - name: Upload full report
+        if: always() && steps.review.outputs.report_path != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: upstream-release-report
+          path: ${{ steps.review.outputs.report_path }}
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Create release summary Issue
+        if: steps.review.outputs.issue_title != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: ${{ steps.review.outputs.issue_title }}
+          ISSUE_BODY_FILE: ${{ steps.review.outputs.issue_body_path }}
+        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$ISSUE_BODY_FILE"
+      - name: Mark incomplete release checks
+        if: steps.review.outputs.failure_count != '0' && steps.review.outputs.failure_count != ''
         run: |
-          git add reports
-          git diff --cached --quiet && exit 0
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "chore: record upstream release reports"
-          git push
+          echo "::error::Some release checks failed. They remain unrecorded and will be retried on the next poll. See the review step logs."
+          exit 1
