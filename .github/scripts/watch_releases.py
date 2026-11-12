@@ -59,21 +59,18 @@ def load_config() -> dict:
 
 
 def configured_repositories(config: dict):
-    for coin, value in config.get("coins", {}).items():
-        if not isinstance(value, dict) or not isinstance(value.get("repositories", []), list):
-            raise ValueError(f"coins.{coin}.repositories must be a list")
-        for item in value["repositories"]:
-            if not isinstance(item, dict):
-                raise ValueError(f"Repository entry for {coin} must be a mapping")
-            repo, from_release = item.get("repo", ""), item.get("from_release", "")
-            if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-                raise ValueError(f"Invalid repo for {coin}: {repo!r}")
-            if not isinstance(from_release, str) or not from_release.strip():
-                raise ValueError(f"from_release is required for {repo}")
-            override = item.get("ai", {})
-            if not isinstance(override, dict):
-                raise ValueError(f"ai override for {repo} must be a mapping")
-            yield str(coin), repo, from_release, override
+    for coin, item in config.get("coins", {}).items():
+        if not isinstance(item, dict):
+            raise ValueError(f"coins.{coin} must be a mapping")
+        repo, from_release = item.get("repo", ""), item.get("from_release", "")
+        if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+            raise ValueError(f"Invalid repo for {coin}: {repo!r}")
+        if not isinstance(from_release, str) or not from_release.strip():
+            raise ValueError(f"from_release is required for {repo}")
+        override = item.get("ai", {})
+        if not isinstance(override, dict):
+            raise ValueError(f"ai override for {repo} must be a mapping")
+        yield str(coin), repo, from_release, override
 
 
 def github_json(path: str):

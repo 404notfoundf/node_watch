@@ -4,7 +4,7 @@
 
 ## 配置监控对象
 
-编辑 [config/watch.yaml](config/watch.yaml)，在 `coins` 下填写币种、仓库和起始 Release：
+将 [config/watch.example.yaml](config/watch.example.yaml) 复制为 `config/watch.yaml`，再替换币种、仓库、真实 Release tag、AI 服务地址和模型等示例值：
 
 ```yaml
 ai:
@@ -13,12 +13,11 @@ ai:
 
 coins:
   tari:
-    repositories:
-      - repo: tari-project/tari
-        from_release: v6.4.0
+    repo: tari-project/tari
+    from_release: v6.4.0
 ```
 
-`repo` 使用 `owner/repository` 格式。`from_release` 必须是该仓库已发布的 GitHub Release tag；配置的版本会纳入分析，并与前一个 Release 比较。之后只处理尚未记录的 Release。当前 YAML 默认没有启用任何仓库。
+每个币种配置一个仓库，`repo` 使用 `owner/repository` 格式。`from_release` 必须是该仓库已发布的 GitHub Release tag；配置的版本会纳入分析，并与前一个 Release 比较。之后只处理尚未记录的 Release。工作流只读取 `config/watch.yaml`，示例文件不会自动加载。
 
 AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model` 和 `prompt`。
 
@@ -29,7 +28,18 @@ AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的
 3. 在仓库 **Settings → Actions → General → Workflow permissions** 中允许工作流读写仓库内容，以便提交报告。
 4. 打开 **Actions → Watch upstream releases → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询，并将新报告提交到默认分支。
 
-如果分支保护规则禁止 `github-actions[bot]` 推送，报告生成后无法自动提交，需要调整规则或手动保留报告。GitHub 的定时工作流可能延迟启动。
+调整轮询频率时，编辑 [.github/workflows/watch-releases.yml](.github/workflows/watch-releases.yml) 中的 `schedule`。例如每 15 分钟运行一次：
+
+```yaml
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+```
+
+将 `cron` 替换为想要的频率即可；保留一条 schedule，避免同时启用多个定时频率。`*/30 * * * *` 表示每 30 分钟，`0 * * * *` 表示每小时。GitHub Actions 的最短 schedule 间隔为 5 分钟；默认按 UTC 调度，运行也可能延迟。详见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule)。
+
+如果分支保护规则禁止 `github-actions[bot]` 推送，报告生成后无法自动提交，需要调整规则或手动保留报告。
 
 ## 在本地运行
 

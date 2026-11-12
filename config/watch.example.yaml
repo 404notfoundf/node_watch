@@ -1,0 +1,17 @@
+# 复制本文件到 watch.yaml 后，替换所有示例值。
+ai:
+  api_url: "https://your-compatible-api.example/v1"
+  model: "your-model"
+  prompt: |
+    用简体中文审查 Release note 和两个 Release tag 之间的代码差异。
+    重点检查硬分叉、兼容性、内存、崩溃、安全和可疑代码，并给出证据和人工复核建议。
+
+coins:
+  example_coin:
+    repo: "owner/mining-node"
+    from_release: "v1.0.0"
+    # 可选：覆盖此币种的 API 地址、模型或提示词；仍共用 GitHub Secret AI_API_KEY。
+    # ai:
+    #   api_url: "https://another-compatible-api.example/v1"
+    #   model: "another-model"
+    #   prompt: "用简体中文审查代码差异。"
