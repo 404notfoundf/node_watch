@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -139,16 +141,30 @@ def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, d
         {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n{prompt}"},
         {"role": "user", "content": material},
     ]}).encode("utf-8")
-    request = urllib.request.Request(api_url, data=payload, headers={
-        "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
-    })
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return content.strip() or "AI 未返回可用分析。"
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, KeyError) as error:
-        return f"AI 调用失败：{type(error).__name__}: {str(error).replace(api_key, '***')}"
+    attempts = 4
+    retryable_statuses = {408, 429, 500, 502, 503, 504}
+    for attempt in range(1, attempts + 1):
+        request = urllib.request.Request(api_url, data=payload, headers={
+            "Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return content.strip() or "AI 未返回可用分析。"
+        except urllib.error.HTTPError as error:
+            if error.code not in retryable_statuses:
+                return f"AI 调用失败：HTTP {error.code}"
+            if attempt == attempts:
+                return f"AI 调用失败：HTTP {error.code}，重试 {attempts} 次后停止"
+            wait = 5 * (2 ** (attempt - 1))
+            print(f"AI HTTP {error.code}; retry {attempt}/{attempts - 1} after {wait}s.", flush=True)
+        except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError) as error:
+            if attempt == attempts:
+                return f"AI 调用失败：{type(error).__name__}，重试 {attempts} 次后停止"
+            wait = 5 * (2 ** (attempt - 1))
+            print(f"AI request failed ({type(error).__name__}); retry {attempt}/{attempts - 1} after {wait}s.", flush=True)
+        time.sleep(wait)
 
 
 def risk_from(analysis: str) -> str:

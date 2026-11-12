@@ -1,7 +1,12 @@
+import io
 import importlib.util
+import json
+import os
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).parents[1] / ".github" / "scripts" / "watch_releases.py"
@@ -27,6 +32,31 @@ class WatchReleaseTests(unittest.TestCase):
             self.assertEqual([item["tag_name"] for item in watch.releases_from_start("o/r", "v2")], ["v2", "v3"])
         finally:
             watch.github_json = original
+
+    def test_ai_retries_rate_limit_then_succeeds(self):
+        calls = 0
+
+        def urlopen(request, timeout):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", None, None)
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "analysis"}}]}).encode())
+
+        with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
+                patch.object(watch.urllib.request, "urlopen", side_effect=urlopen), \
+                patch.object(watch.time, "sleep") as sleep:
+            result = watch.ask_ai(
+                {"api_url": "https://ai.example/v1", "model": "test"},
+                "owner/repo",
+                {"tag_name": "v1"},
+                "v0",
+                "diff",
+            )
+
+        self.assertEqual(result, "analysis")
+        self.assertEqual(calls, 2)
+        sleep.assert_called_once_with(5)
 
     def test_report_groups_by_coin_and_numbers_items_per_release(self):
         original_reports = watch.REPORTS
