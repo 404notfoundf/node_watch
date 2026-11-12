@@ -196,6 +196,8 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertLess(names.index("Upload full report"), names.index("Create release summary Issue"))
         self.assertEqual(workflow["permissions"]["contents"], "read")
         self.assertEqual(workflow["permissions"]["issues"], "write")
+        self.assertIn("actions/checkout@v7", [step.get("uses") for step in steps])
+        self.assertIn("actions/setup-python@v7", [step.get("uses") for step in steps])
 
     def test_notify_logins_uses_configured_users_or_owner_fallback(self):
         with patch.dict(os.environ, {"NOTIFY_LOGINS": "alice, bob alice", "GITHUB_REPOSITORY_OWNER": "owner"}):
