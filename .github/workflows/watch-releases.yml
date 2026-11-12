@@ -33,6 +33,7 @@ jobs:
           NOTIFY_LOGINS: ${{ vars.NOTIFY_LOGINS }}
         run: python .github/scripts/watch_releases.py
       - name: Upload full report
+        id: upload
         if: always() && steps.review.outputs.report_path != ''
         uses: actions/upload-artifact@v7
         with:
@@ -41,12 +42,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
       - name: Create release summary Issue
-        if: steps.review.outputs.issue_title != ''
+        if: steps.review.outputs.issue_title != '' && steps.upload.outputs.artifact-url != ''
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_TITLE: ${{ steps.review.outputs.issue_title }}
           ISSUE_BODY_FILE: ${{ steps.review.outputs.issue_body_path }}
-        run: gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$ISSUE_BODY_FILE"
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          python -c 'from pathlib import Path; import os; p=Path(os.environ["ISSUE_BODY_FILE"]); p.write_text(p.read_text(encoding="utf-8").replace("{{artifact_url}}", os.environ["ARTIFACT_URL"]), encoding="utf-8")'
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$ISSUE_BODY_FILE"
       - name: Mark incomplete release checks
         if: steps.review.outputs.failure_count != '0' && steps.review.outputs.failure_count != ''
         run: |

@@ -6,7 +6,7 @@
 - 代码比较：`{{comparison_start}}` → `{{tag}}`
 - AI 风险级别：{{risk}}
 - **重点标记：** {{highlights}}
-{{diff_limit_summary}}
+- **标记依据：** {{highlight_reasons}}
 
 ##### AI 审查
 

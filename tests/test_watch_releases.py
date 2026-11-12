@@ -73,45 +73,69 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 4)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20])
 
-    def test_ai_receives_explicit_truncation_status(self):
-        captured = {}
+    def test_ai_reviews_all_diff_chunks_then_synthesizes_findings(self):
+        captured = []
 
         def urlopen(request, timeout):
-            captured.update(json.loads(request.data.decode("utf-8")))
-            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "analysis"}}]}).encode())
+            captured.append(json.loads(request.data.decode("utf-8")))
+            content = "analysis" if len(captured) == 4 else f"Chunk finding {len(captured)}"
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
-                patch.object(watch, "MAX_DIFF_CHARS", 4), \
+                patch.object(watch, "DIFF_CHUNK_CHARS", 4), \
                 patch.object(watch.urllib.request, "urlopen", side_effect=urlopen):
-            watch.ask_ai(
+            result = watch.ask_ai(
                 {"api_url": "https://ai.example/v1", "model": "test"},
-                "owner/repo", {"tag_name": "v1"}, "v0", "abcdef",
+                "owner/repo", {"tag_name": "v1", "body": "release notes"}, "v0", "abcdefghij",
             )
-        material = captured["messages"][1]["content"]
-        self.assertIn("TRUNCATED: 2 characters were omitted", material)
-        self.assertIn("<untrusted_code_diff>\nabcd\n</untrusted_code_diff>", material)
-        self.assertNotIn("abcdef", material)
+        self.assertEqual(result, "analysis")
+        self.assertEqual(len(captured), 4)
+        chunk_materials = [request["messages"][1]["content"] for request in captured[:3]]
+        self.assertIn("Diff chunk: 1/3", chunk_materials[0])
+        self.assertIn("<untrusted_code_diff_chunk>\nabcd\n</untrusted_code_diff_chunk>", chunk_materials[0])
+        self.assertIn("<untrusted_code_diff_chunk>\nefgh\n</untrusted_code_diff_chunk>", chunk_materials[1])
+        self.assertIn("<untrusted_code_diff_chunk>\nij\n</untrusted_code_diff_chunk>", chunk_materials[2])
+        summary_material = captured[3]["messages"][1]["content"]
+        self.assertIn("all 10 characters were reviewed in 3 chunks", summary_material)
+        self.assertIn("release notes", summary_material)
+        self.assertIn("Chunk finding 1", summary_material)
+        self.assertIn("Chunk finding 2", summary_material)
+        self.assertIn("Chunk finding 3", summary_material)
 
     def test_highlight_summary_marks_major_changes(self):
         analysis = (
             "重点标记：破坏性变更=待验证；硬分叉/共识=已确认；兼容性=待验证；"
-            "内存问题=修复；安全=风险；稳定性/数据=无"
+            "内存问题=修复；安全=风险；稳定性/数据=无\n"
+            "重点标记依据：破坏性变更=发行说明称移除旧配置格式，但差异未覆盖配置解析；"
+            "硬分叉/共识=src/consensus.rs 修改了区块验证规则；兼容性=发行说明称调整协议字段，差异未核实；"
+            "内存问题=src/cache.rs 修复缓存未释放；安全=src/rpc.rs 新增未校验输入；稳定性/数据=无"
         )
         summary = watch.highlight_summary(analysis)
-        self.assertIn("破坏性变更**（待验证）", summary)
+        self.assertIn("📋 **发行说明待核实：** 破坏性变更声明、兼容性声明", summary)
         self.assertIn("硬分叉/共识**（已确认）", summary)
-        self.assertIn("兼容性**（待验证）", summary)
         self.assertIn("✅ **内存问题修复**", summary)
         self.assertIn("安全**（风险）", summary)
         self.assertNotIn("稳定性/数据", summary)
+        self.assertNotIn("⚠️", summary)
+        reasons = watch.highlight_reason_summary(analysis)
+        self.assertIn("**破坏性变更：** 发行说明称移除旧配置格式，但差异未覆盖配置解析", reasons)
+        self.assertIn("**硬分叉/共识：** src/consensus.rs 修改了区块验证规则", reasons)
+        self.assertIn("**内存问题：** src/cache.rs 修复缓存未释放", reasons)
+        self.assertIn("**安全：** src/rpc.rs 新增未校验输入", reasons)
         self.assertIn("重点标记", watch.SYSTEM_PROMPT)
         self.assertIn("memory leaks", watch.SYSTEM_PROMPT)
+        self.assertIn("chunk-review summaries", watch.SYSTEM_PROMPT)
+        self.assertIn("Omit routine refactors", watch.SYSTEM_PROMPT)
+        self.assertIn("one or two concise sentences", watch.SYSTEM_PROMPT)
+        self.assertIn("minor fixes or optimizations", watch.SYSTEM_PROMPT)
         _, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v1"}, "v0",
-            f"风险级别：P1\n{analysis}\n1. Note contains {{{{repo}}}}.", 9,
+            f"风险级别：P1\n{analysis}\n1. Note contains {{{{repo}}}}.",
         )
         self.assertIn(f"- **重点标记：** {summary}", report)
-        self.assertIn("代码差异截断（省略 9 个字符）", report)
+        self.assertIn(f"- **标记依据：** {reasons}", report)
+        self.assertNotIn("重点标记依据：", report)
+        self.assertNotIn("省略", report)
         self.assertIn("1. Note contains {{repo}}.", report)
         self.assertNotIn("{{tag}}", report)
 
@@ -119,7 +143,9 @@ class WatchReleaseTests(unittest.TestCase):
         def entry(coin, repo, tag):
             analysis = (
                 "风险级别：P1\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
-                "内存问题=修复；安全=无；稳定性/数据=无\n1. Finding"
+                "内存问题=修复；安全=无；稳定性/数据=无\n"
+                "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+                "内存问题=src/cache.rs 修复缓存未释放；安全=无；稳定性/数据=无\n1. Finding"
             )
             return watch.format_release(coin, repo, {"tag_name": tag}, "previous", analysis)
 
@@ -147,12 +173,13 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("`v2`", body)
         self.assertLess(body.index("**coin-b**"), body.index("**tari**"))
         self.assertIn("内存问题修复", body)
+        self.assertIn("  - 标记依据：**内存问题：** src/cache.rs 修复缓存未释放", body)
         self.assertNotIn("1. Finding", body)
         self.assertIn("/actions/runs/12345", body)
         self.assertIn("@owner", body)
         self.assertRegex(body, r"(?m)^<!-- watch-release-keys: [A-Za-z0-9_-]+ -->$")
         self.assertNotIn("reports/", body)
-        self.assertIn("upstream-release-report", body)
+        self.assertIn("[下载完整报告（保留 90 天）]({{artifact_url}})", body)
 
     def test_issue_markers_are_the_persistent_release_deduplication_state(self):
         releases = [("tari", "tari-project/tari", "v6.4.0")]
@@ -200,6 +227,10 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(workflow["permissions"]["issues"], "write")
         self.assertIn("actions/checkout@v7", [step.get("uses") for step in steps])
         self.assertIn("actions/setup-python@v7", [step.get("uses") for step in steps])
+        upload = next(step for step in steps if step.get("name") == "Upload full report")
+        create_issue = next(step for step in steps if step.get("name") == "Create release summary Issue")
+        self.assertEqual(upload["id"], "upload")
+        self.assertEqual(create_issue["env"]["ARTIFACT_URL"], "${{ steps.upload.outputs.artifact-url }}")
 
     def test_notify_logins_uses_configured_users_or_owner_fallback(self):
         with patch.dict(os.environ, {"NOTIFY_LOGINS": "alice, bob alice", "GITHUB_REPOSITORY_OWNER": "owner"}):
