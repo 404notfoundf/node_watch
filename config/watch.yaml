@@ -1,0 +1,23 @@
+# API 地址、模型和提示词可以按仓库用 ai: 覆盖。密钥统一从 GitHub Secret AI_API_KEY 读取。
+ai:
+  api_url: ""
+  model: ""
+  prompt: |
+    用简体中文审查这次 GitHub Release 的发行说明和两个 Release tag 之间的代码变化。
+    重点检查：硬分叉、共识或兼容性变化、内存泄漏或资源问题、崩溃、安全漏洞、
+    恶意代码迹象和破坏性升级。发行说明是作者声明，必须根据代码差异区分“代码支持”
+    “待验证”和“证据不足”。不要把关键词本身当作漏洞，也不要声称已审查未提供的代码。
+    首行必须为“风险级别：P0/P1/P2/P3/待人工复核”之一；随后给出重要发现、相关文件
+    和人工复核建议。没有重大问题时明确说明。
+
+# 按币种分组添加监控对象。from_release 表示从这个 GitHub Release 开始分析，包含该版本。
+# coins:
+#   tari:
+#     repositories:
+#       - repo: tari-project/tari
+#         from_release: v6.4.0
+#         # 可选：仅覆盖此仓库的 API 地址、模型或提示词；仍共用 AI_API_KEY。
+#         # ai:
+#         #   model: your-model
+#         #   prompt: ...
+coins: {}

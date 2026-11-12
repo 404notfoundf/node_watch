@@ -1,0 +1,39 @@
+name: Watch upstream releases
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: watch-upstream-releases
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Review new GitHub Releases
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/watch_releases.py
+      - name: Commit reports
+        run: |
+          git add reports
+          git diff --cached --quiet && exit 0
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "chore: record upstream release reports"
+          git push
