@@ -51,7 +51,7 @@ $env:AI_API_KEY = "your-api-key"
 python .github/scripts/watch_releases.py
 ```
 
-本地运行发现新 Release 时会在 `reports/` 下生成报告并更新索引，不会创建 Issue 或上传 Artifact。API 地址、模型和监控列表仍从 `config/watch.yaml` 读取。
+完整报告中每个 Release 的 Markdown 版式由 [.github/scripts/upstream_release_report.md](.github/scripts/upstream_release_report.md) 控制；脚本负责分组和填入数据。本地运行发现新 Release 时会在 `reports/` 下为本轮生成一份报告，不会创建 Issue 或上传 Artifact。API 地址、模型和监控列表仍从 `config/watch.yaml` 读取。
 
 ## 检查范围
 

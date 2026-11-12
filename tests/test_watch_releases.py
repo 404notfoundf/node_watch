@@ -108,10 +108,12 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("memory leaks", watch.SYSTEM_PROMPT)
         _, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v1"}, "v0",
-            f"风险级别：P1\n{analysis}", 9,
+            f"风险级别：P1\n{analysis}\n1. Note contains {{{{repo}}}}.", 9,
         )
         self.assertIn(f"- **重点标记：** {summary}", report)
         self.assertIn("代码差异截断（省略 9 个字符）", report)
+        self.assertIn("1. Note contains {{repo}}.", report)
+        self.assertNotIn("{{tag}}", report)
 
     def test_issue_summary_lists_all_coins_releases_and_deduplicates(self):
         def entry(coin, repo, tag):
@@ -268,8 +270,6 @@ class WatchReleaseTests(unittest.TestCase):
                 report_files = [path for path in watch.REPORTS.glob("*.md") if path.name != "index.md"]
                 self.assertEqual(len(report_files), 1)
                 report = report_files[0].read_text(encoding="utf-8")
-                index = (watch.REPORTS / "index.md").read_text(encoding="utf-8")
-                self.assertIn(f"]({report_files[0].name})", index)
                 self.assertLess(report.index("### A 币种"), report.index("### B 币种"))
                 self.assertLess(report.index("#### v1"), report.index("#### v2"))
                 self.assertNotIn("#### a/node", report)
@@ -289,24 +289,12 @@ class WatchReleaseTests(unittest.TestCase):
             finally:
                 watch.REPORTS = original_reports
 
-    def test_each_batch_gets_a_report_and_legacy_index_is_preserved(self):
+    def test_new_reports_do_not_create_an_index_and_record_releases(self):
         original_reports = watch.REPORTS
         with tempfile.TemporaryDirectory() as temp_dir:
             watch.REPORTS = Path(temp_dir)
             try:
-                legacy_meta = {"coin": "coin", "repo": "owner/repo", "tag": "v1"}
-                encoded = watch.base64.urlsafe_b64encode(
-                    json.dumps(legacy_meta, sort_keys=True).encode("utf-8")
-                ).decode("ascii").rstrip("=")
-                legacy = watch.REPORTS / "index.md"
-                legacy.write_text(
-                    f"# Old report\n\n## 检查批次 2026-11-10 00:00 UTC\n\n<!-- watch-release: {encoded} -->\nOld content\n",
-                    encoding="utf-8",
-                )
-
-                watch.archive_legacy_index()
-                watch.update_report_index()
-                for tag in ("v2", "v3"):
+                for tag in ("v1", "v2", "v3"):
                     watch.append_report_batch({"coin": {"owner/repo": [(
                         {"coin": "coin", "repo": "owner/repo", "tag": tag, "published_at": "2026-11-11T00:00:00Z"},
                         f"#### {tag}\n",
@@ -314,10 +302,7 @@ class WatchReleaseTests(unittest.TestCase):
 
                 report_files = [path for path in watch.REPORTS.glob("*.md") if path.name != "index.md"]
                 self.assertEqual(len(report_files), 3)
-                index = (watch.REPORTS / "index.md").read_text(encoding="utf-8")
-                self.assertNotIn("watch-release:", index)
-                self.assertIn("Old content", (watch.REPORTS / "2026-11-10T00-00Z.md").read_text(encoding="utf-8"))
-                self.assertTrue(all(f"]({path.name})" in index for path in report_files))
+                self.assertFalse((watch.REPORTS / "index.md").exists())
                 self.assertEqual(watch.reported_releases(), {
                     ("coin", "owner/repo", "v1"),
                     ("coin", "owner/repo", "v2"),
