@@ -82,10 +82,9 @@ class WatchReleaseTests(unittest.TestCase):
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
-                patch.object(watch, "DIFF_CHUNK_CHARS", 4), \
                 patch.object(watch.urllib.request, "urlopen", side_effect=urlopen):
             result = watch.ask_ai(
-                {"api_url": "https://ai.example/v1", "model": "test"},
+                {"api_url": "https://ai.example/v1", "model": "test", "diff_chunk_chars": 4},
                 "owner/repo", {"tag_name": "v1", "body": "release notes"}, "v0", "abcdefghij",
             )
         self.assertEqual(result, "analysis")
@@ -101,6 +100,10 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("Chunk finding 1", summary_material)
         self.assertIn("Chunk finding 2", summary_material)
         self.assertIn("Chunk finding 3", summary_material)
+
+    def test_ai_rejects_invalid_diff_chunk_size(self):
+        with self.assertRaises(watch.AIReviewError):
+            watch.ask_ai({"diff_chunk_chars": 0}, "owner/repo", {"tag_name": "v1"}, "v0", "diff")
 
     def test_highlight_summary_marks_major_changes(self):
         analysis = (

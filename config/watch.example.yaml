@@ -2,6 +2,7 @@
 ai:
   api_url: "https://your-compatible-api.example/v1"
   model: "your-model"
+  diff_chunk_chars: 120000 # 按模型上下文窗口调整；默认值为 120000
   prompt: |
     用简体中文审查 Release note 和两个 Release tag 之间的代码差异。
     按系统指定格式输出风险级别、重点标记和重点标记依据。每个非“无”的标记都要说明

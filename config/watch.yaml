@@ -2,6 +2,7 @@
 ai:
   api_url: "https://token-plan-sgp.xiaomimimo.com/v1"
   model: "mimo-v2.6-pro"
+  diff_chunk_chars: 400000
   prompt: |
     用简体中文审查这次 GitHub Release 的发行说明和两个 Release tag 之间的代码变化。
     按系统指定格式输出风险级别、重点标记和重点标记依据。每个非“无”的标记都要说明

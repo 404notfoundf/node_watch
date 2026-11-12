@@ -10,6 +10,7 @@
 ai:
   api_url: https://your-compatible-api.example/v1
   model: your-model
+  diff_chunk_chars: 120000
 
 coins:
   tari:
@@ -19,7 +20,7 @@ coins:
 
 每个币种配置一个仓库，`repo` 使用 `owner/repository` 格式。`from_release` 必须是该仓库已发布的 GitHub Release tag；配置的版本会纳入分析，并与前一个 Release 比较。之后只处理尚未记录的 Release。工作流只读取 `config/watch.yaml`，示例文件不会自动加载。
 
-AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model` 和 `prompt`。
+AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。`diff_chunk_chars` 控制顺序审查时每个代码差异分段的字符数，默认建议 120,000；应根据所用模型的上下文窗口设置。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model`、`prompt` 和 `diff_chunk_chars`。
 
 可选地，在 **Settings → Secrets and variables → Actions → Variables** 设置 `NOTIFY_LOGINS`，填写逗号分隔的 GitHub 用户名以 @提及多个接收人。留空时默认 @提及仓库所有者；仓库属于组织时，组织账号提及不保证通知所有成员，建议填写具体用户。
 
@@ -55,6 +56,6 @@ python .github/scripts/watch_releases.py
 
 ## 检查范围
 
-工作流不运行上游程序或测试。AI 阅读 Release note 和两个 tag 之间的完整代码差异，只报告会实质影响矿工、节点运行、共识、兼容性、安全、内存、稳定性或数据的变更；常规重构、文档、测试、普通依赖更新和低影响修复会略过。Issue 摘要和完整报告会为每个非“无”的重点标记单独列出发行说明声明或代码证据。“发行说明待核实”表示发行说明明确提到该类变更，但相邻 tag 的代码差异没有证实，不表示已发现相应问题。代码差异每段最多 120,000 个字符；大型差异会逐段审查后再汇总，不会因单次请求上限而省略尾部代码，但会增加 API 调用量、费用和运行时间。任一分段审查失败，该版本不会标记为已处理，会在后续轮询重试。AI 静态审阅不能替代人工安全审查。
+工作流不运行上游程序或测试。AI 阅读 Release note 和两个 tag 之间的完整代码差异，只报告会实质影响矿工、节点运行、共识、兼容性、安全、内存、稳定性或数据的变更；常规重构、文档、测试、普通依赖更新和低影响修复会略过。Issue 摘要和完整报告会为每个非“无”的重点标记单独列出发行说明声明或代码证据。“发行说明待核实”表示发行说明明确提到该类变更，但相邻 tag 的代码差异没有证实，不表示已发现相应问题。代码差异按 `diff_chunk_chars` 设置顺序分段审查后再汇总，不会省略尾部代码；分段越多，串行调用次数和运行时间越长。任一分段审查失败，该版本不会标记为已处理，会在后续轮询重试。AI 静态审阅不能替代人工安全审查。
 
 AI 请求遇到网络错误、超时、响应 JSON 解析错误，或 HTTP 408、429、500、502、503、504 时最多尝试 4 次（首次请求加最多 3 次重试），重试间隔为 5、10、20 秒。其他 HTTP 错误立即报告为检查失败；该 Release 不会标记为已处理，后续轮询会重试。

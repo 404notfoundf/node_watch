@@ -209,7 +209,10 @@ def call_ai(settings: dict, system_prompt: str, material: str) -> str:
 
 
 def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, diff: str) -> str:
-    chunks = split_diff(diff)
+    chunk_chars = settings.get("diff_chunk_chars", DIFF_CHUNK_CHARS)
+    if type(chunk_chars) is not int or chunk_chars < 1:
+        raise AIReviewError("AI 配置 diff_chunk_chars 必须是正整数。")
+    chunks = split_diff(diff, chunk_chars)
     print(f"Reviewing {repo} {release.get('tag_name')} in {len(chunks)} diff chunk(s).", flush=True)
     if len(chunks) == 1:
         material = "\n".join([
