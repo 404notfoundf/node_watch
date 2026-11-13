@@ -13,9 +13,35 @@ SCRIPT = Path(__file__).parents[1] / ".github" / "scripts" / "watch_releases.py"
 SPEC = importlib.util.spec_from_file_location("watch_releases", SCRIPT)
 watch = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(watch)
+PUBLISH_SCRIPT = SCRIPT.with_name("publish_report_site.py")
+PUBLISH_SPEC = importlib.util.spec_from_file_location("publish_report_site", PUBLISH_SCRIPT)
+publish_site = importlib.util.module_from_spec(PUBLISH_SPEC)
+PUBLISH_SPEC.loader.exec_module(publish_site)
 
 
 class WatchReleaseTests(unittest.TestCase):
+    def test_pages_report_hides_marker_and_escapes_raw_html(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            report_dir = root / "input"
+            site_dir = root / "site"
+            report_dir.mkdir()
+            (report_dir / "report.md").write_text(
+                "# 上游 Release 监控报告\n\n"
+                "## 检查批次 2026-11-13 03:33:55 UTC\n\n"
+                "### tari\n\n<!-- watch-release: secret-marker -->\n\n"
+                "#### v1.0.0\n\n<script>alert(1)</script>\n",
+                encoding="utf-8",
+            )
+
+            report_path = publish_site.publish_report(report_dir, site_dir, "123", "1", 180)
+            rendered = (site_dir / report_path).read_text(encoding="utf-8")
+
+        self.assertIn("<h4>v1.0.0</h4>", rendered)
+        self.assertNotIn("watch-release:", rendered)
+        self.assertNotIn("<script>", rendered)
+        self.assertIn("&lt;script&gt;", rendered)
+
     def test_report_path_cannot_escape_reports_directory(self):
         path = watch.report_path("coin/../x", "owner/repo", "v1/../2")
         self.assertEqual(path, watch.REPORTS / "coin%2F..%2Fx" / "owner--repo" / "v1%2F..%2F2.md")
@@ -189,12 +215,12 @@ class WatchReleaseTests(unittest.TestCase):
             "内存问题=src/cache.rs 修复缓存未释放；安全=src/rpc.rs 新增未校验输入；稳定性/数据=无"
         )
         summary = watch.highlight_summary(analysis)
-        self.assertIn("📋 **发行说明待核实：** 破坏性变更声明、兼容性声明", summary)
-        self.assertIn("硬分叉/共识**（已确认）", summary)
+        self.assertIn("⚠️ **重大发行说明待核实：** 破坏性变更声明、兼容性声明", summary)
+        self.assertIn("重大共识变更**（已确认）", summary)
         self.assertIn("✅ **内存问题修复**", summary)
         self.assertIn("安全**（风险）", summary)
         self.assertNotIn("稳定性/数据", summary)
-        self.assertNotIn("⚠️", summary)
+        self.assertIn("⚠️", summary)
         reasons = watch.highlight_reason_summary(analysis)
         self.assertIn("**破坏性变更：** 发行说明称移除旧配置格式，但差异未覆盖配置解析", reasons)
         self.assertIn("**硬分叉/共识：** src/consensus.rs 修改了区块验证规则", reasons)
@@ -206,6 +232,11 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("Omit routine refactors", watch.SYSTEM_PROMPT)
         self.assertIn("one or two concise sentences", watch.SYSTEM_PROMPT)
         self.assertIn("minor fixes or optimizations", watch.SYSTEM_PROMPT)
+        hard_fork = analysis.replace(
+            "硬分叉/共识=src/consensus.rs 修改了区块验证规则",
+            "硬分叉/共识=硬分叉：激活高度 123 会使旧节点拒绝新区块",
+        )
+        self.assertIn("硬分叉**（已确认）", watch.highlight_summary(hard_fork))
         _, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v1"}, "v0",
             f"风险级别：P1\n{analysis}\n1. Note contains {{{{repo}}}}.",
@@ -266,13 +297,15 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertLess(body.index("**coin-b**"), body.index("**tari**"))
         self.assertIn("内存问题修复", body)
         self.assertIn("完整审查", body)
+        self.assertIn("要点：内存问题：src/cache.rs 修复缓存未释放", body)
         self.assertNotIn("标记依据", body)
         self.assertNotIn("1. Finding", body)
         self.assertIn("/actions/runs/12345", body)
         self.assertIn("@owner", body)
         self.assertRegex(body, r"(?m)^<!-- watch-release-keys: [A-Za-z0-9_-]+ -->$")
         self.assertNotIn("reports/", body)
-        self.assertIn("[下载完整报告（保留 90 天）]({{artifact_url}})", body)
+        self.assertIn("[在线查看完整报告]({{report_url}})", body)
+        self.assertIn("[下载 Markdown 报告（保留 90 天）]({{artifact_url}})", body)
 
     def test_issue_markers_are_the_persistent_release_deduplication_state(self):
         releases = [("tari", "tari-project/tari", "v6.4.0")]
@@ -416,20 +449,33 @@ class WatchReleaseTests(unittest.TestCase):
             self.assertEqual(values["issue_title"], watch.issue_title(entries))
             self.assertIn("watch-release-keys", Path(values["issue_body_path"]).read_text(encoding="utf-8"))
 
-    def test_workflow_uploads_report_before_issue_and_does_not_commit_reports(self):
+    def test_workflow_publishes_report_before_issue_and_does_not_commit_reports(self):
         workflow = watch.yaml.safe_load((SCRIPT.parents[1] / "workflows" / "watch-releases.yml").read_text(encoding="utf-8"))
-        steps = workflow["jobs"]["watch"]["steps"]
-        names = [step.get("name", "") for step in steps]
-        self.assertNotIn("Commit reports", names)
-        self.assertLess(names.index("Upload full report"), names.index("Create release summary Issue"))
-        self.assertEqual(workflow["permissions"]["contents"], "read")
-        self.assertEqual(workflow["permissions"]["issues"], "write")
-        self.assertIn("actions/checkout@v7", [step.get("uses") for step in steps])
-        self.assertIn("actions/setup-python@v7", [step.get("uses") for step in steps])
-        upload = next(step for step in steps if step.get("name") == "Upload full report")
-        create_issue = next(step for step in steps if step.get("name") == "Create release summary Issue")
+        watch_job = workflow["jobs"]["watch"]
+        publish_job = workflow["jobs"]["publish-report"]
+        watch_steps = watch_job["steps"]
+        publish_steps = publish_job["steps"]
+        watch_names = [step.get("name", "") for step in watch_steps]
+        publish_names = [step.get("name", "") for step in publish_steps]
+        self.assertNotIn("Commit reports", watch_names + publish_names)
+        self.assertLess(watch_names.index("Upload full report"), watch_names.index("Mark incomplete release checks"))
+        self.assertLess(publish_names.index("Deploy report website"), publish_names.index("Create release summary Issue"))
+        self.assertEqual(publish_job["needs"], "watch")
+        self.assertEqual(watch_job["permissions"]["contents"], "read")
+        self.assertEqual(watch_job["permissions"]["issues"], "read")
+        self.assertEqual(publish_job["permissions"]["contents"], "write")
+        self.assertEqual(publish_job["permissions"]["pages"], "write")
+        self.assertEqual(publish_job["permissions"]["id-token"], "write")
+        self.assertIn("actions/checkout@v7", [step.get("uses") for step in watch_steps])
+        self.assertIn("actions/setup-python@v7", [step.get("uses") for step in watch_steps])
+        upload = next(step for step in watch_steps if step.get("name") == "Upload full report")
+        create_issue = next(step for step in publish_steps if step.get("name") == "Create release summary Issue")
         self.assertEqual(upload["id"], "upload")
-        self.assertEqual(create_issue["env"]["ARTIFACT_URL"], "${{ steps.upload.outputs.artifact-url }}")
+        self.assertEqual(upload["with"]["retention-days"], 90)
+        self.assertEqual(create_issue["env"]["ARTIFACT_URL"], "${{ needs.watch.outputs.artifact_url }}")
+        self.assertEqual(create_issue["env"]["PAGE_URL"], "${{ steps.deployment.outputs.page_url }}")
+        self.assertIn("actions/upload-pages-artifact@v3", [step.get("uses") for step in publish_steps])
+        self.assertIn("actions/deploy-pages@v4", [step.get("uses") for step in publish_steps])
 
     def test_notify_logins_uses_configured_users_or_owner_fallback(self):
         with patch.dict(os.environ, {"NOTIFY_LOGINS": "alice, bob alice", "GITHUB_REPOSITORY_OWNER": "owner"}):

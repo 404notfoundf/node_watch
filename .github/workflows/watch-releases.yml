@@ -9,13 +9,18 @@ concurrency:
   group: watch-upstream-releases
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  issues: write
-
 jobs:
   watch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      report_path: ${{ steps.review.outputs.report_path }}
+      issue_title: ${{ steps.review.outputs.issue_title }}
+      issue_body_base64: ${{ steps.review.outputs.issue_body_base64 }}
+      failure_count: ${{ steps.review.outputs.failure_count }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -41,18 +46,109 @@ jobs:
           path: ${{ steps.review.outputs.report_path }}
           if-no-files-found: ignore
           retention-days: 90
-      - name: Create release summary Issue
-        if: steps.review.outputs.issue_title != '' && steps.upload.outputs.artifact-url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_TITLE: ${{ steps.review.outputs.issue_title }}
-          ISSUE_BODY_FILE: ${{ steps.review.outputs.issue_body_path }}
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        run: |
-          python -c 'from pathlib import Path; import os; p=Path(os.environ["ISSUE_BODY_FILE"]); p.write_text(p.read_text(encoding="utf-8").replace("{{artifact_url}}", os.environ["ARTIFACT_URL"]), encoding="utf-8")'
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$ISSUE_BODY_FILE"
       - name: Mark incomplete release checks
         if: steps.review.outputs.failure_count != '0' && steps.review.outputs.failure_count != ''
         run: |
           echo "::error::Some release checks failed. They remain unrecorded and will be retried on the next poll. See the review step logs."
+          exit 1
+
+  publish-report:
+    needs: watch
+    if: always() && needs.watch.outputs.report_path != ''
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Download full report
+        uses: actions/download-artifact@v8
+        with:
+          name: upstream-release-report
+          path: ${{ runner.temp }}/upstream-release-report
+      - name: Restore Pages history
+        env:
+          PAGES_DIR: ${{ runner.temp }}/upstream-release-pages
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            git worktree add -b gh-pages "$PAGES_DIR" FETCH_HEAD
+          else
+            git worktree add --detach "$PAGES_DIR" HEAD
+            git -C "$PAGES_DIR" switch --orphan gh-pages
+            git -C "$PAGES_DIR" rm -rf -- .
+          fi
+      - name: Render report website
+        id: render
+        env:
+          PAGES_DIR: ${{ runner.temp }}/upstream-release-pages
+          REPORT_DIR: ${{ runner.temp }}/upstream-release-report
+          REPORT_RETENTION_DAYS: '180'
+        run: |
+          report_path="$(python .github/scripts/publish_report_site.py \
+            --report-dir "$REPORT_DIR" \
+            --site-dir "$PAGES_DIR" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --retention-days "$REPORT_RETENTION_DAYS")"
+          echo "report_path=$report_path" >> "$GITHUB_OUTPUT"
+      - name: Save Pages history
+        env:
+          PAGES_DIR: ${{ runner.temp }}/upstream-release-pages
+        run: |
+          git -C "$PAGES_DIR" config user.name "github-actions[bot]"
+          git -C "$PAGES_DIR" config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C "$PAGES_DIR" add --all
+          git -C "$PAGES_DIR" commit -m "Publish upstream release report $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          git -C "$PAGES_DIR" push origin gh-pages
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/upstream-release-pages
+      - name: Deploy report website
+        id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Add report link to Actions summary
+        if: steps.deployment.outputs.page_url != ''
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          REPORT_PATH: ${{ steps.render.outputs.report_path }}
+          ARTIFACT_URL: ${{ needs.watch.outputs.artifact_url }}
+        run: |
+          report_url="${PAGE_URL%/}/$REPORT_PATH"
+          echo "## Release report" >> "$GITHUB_STEP_SUMMARY"
+          echo "[在线阅读完整报告](${report_url})" >> "$GITHUB_STEP_SUMMARY"
+          echo "[下载 Markdown Artifact](${ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
+      - name: Create release summary Issue
+        if: always() && needs.watch.outputs.issue_title != '' && needs.watch.outputs.artifact_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: ${{ needs.watch.outputs.issue_title }}
+          ISSUE_BODY_BASE64: ${{ needs.watch.outputs.issue_body_base64 }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          REPORT_PATH: ${{ steps.render.outputs.report_path }}
+          ARTIFACT_URL: ${{ needs.watch.outputs.artifact_url }}
+        run: |
+          python -c 'from pathlib import Path; import base64,os; p=Path(os.environ["RUNNER_TEMP"])/"upstream-release-issue.md"; body=base64.b64decode(os.environ["ISSUE_BODY_BASE64"]).decode("utf-8").replace("{{artifact_url}}", os.environ["ARTIFACT_URL"]); page_url=os.environ.get("PAGE_URL", ""); report_path=os.environ.get("REPORT_PATH", ""); report_url=page_url.rstrip("/")+"/"+report_path if page_url and report_path else ""; body=body.replace("{{report_url}}", report_url); body=body.replace("- [在线查看完整报告]()\n", "") if not report_url else body; p.write_text(body, encoding="utf-8")'
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$RUNNER_TEMP/upstream-release-issue.md"
+      - name: Mark Pages deployment failure
+        if: steps.deployment.outcome == 'failure'
+        run: |
+          echo "::error::The report Artifact and Issue were created, but the Pages deployment failed. See the deployment logs."
           exit 1

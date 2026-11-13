@@ -1,6 +1,6 @@
 # GitHub Release Watch
 
-这个仓库用 GitHub Actions 按配置的频率检查公开 GitHub 仓库。发现新 Release 后，会比较相邻 Release tag 之间的代码差异，调用配置的 AI 做静态审阅。每轮生成一份按币种和版本分段的完整报告，醒目标出破坏性变更、硬分叉/共识、兼容性、内存问题、安全和稳定性/数据相关事项。工作流创建一条汇总 Issue，并将完整报告上传为保留 90 天的 Artifact；Issue 中提供报告下载直达链接。新生成的完整报告不会提交到仓库。
+这个仓库用 GitHub Actions 按配置的频率检查公开 GitHub 仓库。发现新 Release 后，会比较相邻 Release tag 之间的代码差异，调用配置的 AI 做静态审阅。每轮生成一份按币种和版本分段的完整报告，醒目标出破坏性变更、硬分叉/共识、兼容性、内存问题、安全和稳定性/数据相关事项。工作流创建一条汇总 Issue，将完整报告发布为可在线阅读的 GitHub Pages 网页，并保留 90 天的 Markdown Artifact 供下载。Pages 历史报告保存在独立的 `gh-pages` 分支中，超过 180 天的目录会在下次发布时从当前网站清理；分支的 Git 提交历史仍保留先前内容。报告不会提交到默认分支的 `reports/` 目录。
 
 ## 配置监控对象
 
@@ -30,8 +30,9 @@ AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的
 
 1. 将本项目推送到 GitHub 默认分支。
 2. 按上文填写 `config/watch.yaml` 并添加 `AI_API_KEY` Secret。
-3. 在仓库 **Settings → Actions → General → Workflow permissions** 中允许工作流读取仓库内容；工作流使用 `issues: write` 创建汇总 Issue。可设置 `NOTIFY_LOGINS` 指定通知用户；未设置时默认提及仓库所有者。
-4. 打开 **Actions → Watch upstream releases → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；发现更新时先上传完整报告 Artifact，再创建汇总 Issue。已处理版本记录在 Issue 中，避免重复报告。
+3. 在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。Pages 报告是公开网页。
+4. 在仓库 **Settings → Actions → General → Workflow permissions** 允许工作流 token 写入仓库内容；工作流会把历史网页保存在 `gh-pages` 分支，另外使用 `issues: write` 创建汇总 Issue、使用 Pages 部署权限发布网页。可设置 `NOTIFY_LOGINS` 指定通知用户；未设置时默认提及仓库所有者。
+5. 打开 **Actions → Watch upstream releases → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；发现更新时先上传完整报告 Artifact、发布网页，再创建带在线报告链接的汇总 Issue。已处理版本记录在 Issue 中，避免重复报告。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
 
 调整轮询频率时，编辑 [.github/workflows/watch-releases.yml](.github/workflows/watch-releases.yml) 中的 `schedule`。例如每 15 分钟运行一次：
 

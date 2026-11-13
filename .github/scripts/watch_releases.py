@@ -61,7 +61,7 @@ Before findings, output these three fields in Chinese:
 风险级别：P0/P1/P2/P3/待人工复核
 重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无
 重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无
-For values on the 重点标记 line, choose only the listed status: 破坏性变更、硬分叉/共识 and 兼容性 use 无、已确认、待验证; the other fields use 无、修复、风险、待验证.
+For values on the 重点标记 line, choose only the listed status: 破坏性变更、硬分叉/共识 and 兼容性 use 无、已确认、待验证; the other fields use 无、修复、风险、待验证. For 硬分叉/共识, a changed consensus validation rule is a 共识变更, not proof of a hard fork. Call it a hard fork only when the release note or diff explicitly states a fork, activation height, network upgrade, or old/new node consensus incompatibility. Start its 重点标记依据 with “硬分叉：” only for that stronger evidence; otherwise start it with “共识变更：”.
 “无”表示发行说明和已提供代码均没有该类的明确声明或证据，不表示已证明被省略代码中不存在问题。只有发行说明明确提及该类变更、但当前代码差异无法核实时，才标“待验证”；只根据代码证据标“已确认”“修复”或“风险”。
 Treat memory leaks, unbounded memory growth, memory exhaustion and OOM fixes or risks as 内存问题. When a release note claim is absent from the supplied diff, report it briefly as an unverified release-note claim; do not invent possible consequences or expand it into speculative findings. If chunk-review summaries are supplied, consolidate them and preserve their stated evidence without adding unsupported details.
 For 重点标记依据, include all six categories in the same order. Use 无 when the matching status is 无. For every other status, give one specific concise reason: cite the release-note claim and say the diff did not confirm it for 待验证; for other statuses, cite the changed file and code evidence. Do not use semicolons inside a reason.
@@ -390,20 +390,26 @@ def highlight_summary(analysis: str) -> str:
     if set(values) != set(HIGHLIGHT_FIELDS) or any(value not in HIGHLIGHT_FIELDS[key] for key, value in values.items()):
         return "未提取到有效重点标记（请查看 AI 审查正文）"
     icons = {"已确认": "🚨", "修复": "✅", "风险": "🚨"}
+    reason_line = re.search(r"(?m)^重点标记依据[：:]\s*(.*)$", analysis)
+    consensus_reason = re.search(r"硬分叉/共识\s*[=：]\s*([^；;]*)", reason_line.group(1)) if reason_line else None
+    confirmed_hard_fork = bool(consensus_reason and re.search(r"(?:^|[：:，,\s])(?:硬分叉|hard[ -]?fork)(?:[：:，,\s]|$)", consensus_reason.group(1), re.IGNORECASE))
     labels = []
     pending = []
     for name, status in values.items():
         if status == "无":
             continue
         if status == "待验证":
-            pending.append("内存相关声明" if name == "内存问题" else f"{name}声明")
+            pending.append("内存相关声明" if name == "内存问题" else ("共识/硬分叉声明" if name == "硬分叉/共识" else f"{name}声明"))
+            continue
+        if name == "硬分叉/共识":
+            labels.append(f"{icons[status]} **{'硬分叉' if confirmed_hard_fork else '重大共识变更'}**（{status}）")
             continue
         if name == "内存问题":
             labels.append({"修复": "✅ **内存问题修复**", "风险": "🚨 **内存问题风险**"}[status])
         else:
             labels.append(f"{icons[status]} **{name}**（{status}）")
     if pending:
-        labels.append("📋 **发行说明待核实：** " + "、".join(pending))
+        labels.append("⚠️ **重大发行说明待核实：** " + "、".join(pending))
     return " · ".join(labels) or "无"
 
 
@@ -441,6 +447,8 @@ def importance(risk: str, highlights: str) -> str:
 def conclusion(risk: str, highlights: str) -> str:
     if risk == "P0":
         return "严重风险"
+    if "重大共识变更" in highlights or "硬分叉" in highlights:
+        return "重点关注"
     if risk == "P1":
         return "重点关注"
     if risk == "P2":
@@ -448,6 +456,29 @@ def conclusion(risk: str, highlights: str) -> str:
     if risk == "P3" and highlights == "无":
         return "不重要"
     return "待人工复核" if risk in {"待人工复核", "未标注"} else "需关注"
+
+
+def issue_key_points(meta: dict) -> str:
+    reasons = meta.get("highlight_reasons", "")
+    if reasons in {"", "无"} or reasons.startswith("AI 未提供"):
+        return ""
+    extracted = dict(re.findall(
+        r"\*\*(破坏性变更|硬分叉/共识|兼容性|内存问题|安全|稳定性/数据)：\*\*\s*(.*?)(?= · \*\*|$)",
+        reasons,
+    ))
+    points = []
+    for category in ("安全", "硬分叉/共识", "内存问题", "稳定性/数据", "破坏性变更", "兼容性"):
+        reason = extracted.get(category, "").strip()
+        if not reason or reason.startswith("原因未提供"):
+            continue
+        reason = re.sub(r"^(?:已确认|风险|修复|待验证)[：，,\s]*", "", reason)
+        label = "硬分叉" if category == "硬分叉/共识" and reason.startswith("硬分叉") else (
+            "重大共识变更" if category == "硬分叉/共识" else category
+        )
+        points.append(f"{label}：{reason[:90].rstrip()}" + ("…" if len(reason) > 90 else ""))
+        if len(points) == 2:
+            break
+    return "；".join(points)
 
 
 def format_release(
@@ -651,6 +682,8 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
                 f"- **{coin}** `{meta['tag']}` · {meta.get('review', '完整审查')} "
                 f"· {meta.get('conclusion', '待人工复核')}{suffix}"
             )
+            if points := issue_key_points(meta):
+                lines.append(f"  - 要点：{points}")
     if pending_failures:
         lines.extend(["", f"> ⚠️ 另有 {pending_failures} 项检查未完成，尚未标记为已处理；请查看 Actions 日志，后续轮询会重试。"])
     mentions = notify_logins()
@@ -662,7 +695,8 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     run_url = f"{server}/{repository}/actions/runs/{run_id}" if repository and run_id else ""
     lines.extend(["", "## 完整报告", ""])
-    lines.append("- [下载完整报告（保留 90 天）]({{artifact_url}})")
+    lines.append("- [在线查看完整报告]({{report_url}})")
+    lines.append("- [下载 Markdown 报告（保留 90 天）]({{artifact_url}})")
     if run_url:
         lines.append(f"- [查看本次 Actions 运行]({run_url})")
     return "\n".join(lines) + "\n"
@@ -672,9 +706,11 @@ def prepare_batch_issue(entries: dict[str, dict[str, list[tuple[dict, str]]]], p
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
     body_file = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / f"upstream-release-issue-{batch_digest(entries)}.md"
-    body_file.write_text(issue_body(entries, pending_failures), encoding="utf-8")
+    body = issue_body(entries, pending_failures)
+    body_file.write_text(body, encoding="utf-8")
     set_workflow_output("issue_title", issue_title(entries))
     set_workflow_output("issue_body_path", str(body_file))
+    set_workflow_output("issue_body_base64", base64.b64encode(body.encode("utf-8")).decode("ascii"))
 
 
 def set_workflow_output(name: str, value: str) -> None:
