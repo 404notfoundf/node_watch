@@ -9,7 +9,6 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-
 SCRIPT = Path(__file__).parents[1] / ".github" / "scripts" / "watch_releases.py"
 SPEC = importlib.util.spec_from_file_location("watch_releases", SCRIPT)
 watch = importlib.util.module_from_spec(SPEC)
@@ -61,6 +60,7 @@ class WatchReleaseTests(unittest.TestCase):
 
     def test_codex_cli_backend_uses_read_only_exec_and_captures_report(self):
         captured = {}
+        temporary_directory = watch.tempfile.TemporaryDirectory
 
         def run(command, **kwargs):
             captured["command"] = command
@@ -71,6 +71,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"AI_BACKEND": "codex_cli"}), \
                 patch.object(watch.shutil, "which", return_value="codex"), \
+                patch.object(watch.tempfile, "TemporaryDirectory", wraps=temporary_directory) as temp_dir, \
                 patch.object(watch.subprocess, "run", side_effect=run):
             result = watch.call_ai({}, "review instructions", "release diff")
 
@@ -80,6 +81,19 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("--ephemeral", captured["command"])
         self.assertIn("review instructions", captured["prompt"])
         self.assertIn("release diff", captured["prompt"])
+        temp_dir.assert_called_once_with(prefix="release-watch-codex-", ignore_cleanup_errors=True)
+
+    def test_codex_cli_failure_keeps_only_the_tail_of_stderr(self):
+        with patch.dict(os.environ, {"AI_BACKEND": "codex_cli"}), \
+                patch.object(watch.shutil, "which", return_value="codex"), \
+                patch.object(watch.subprocess, "run", return_value=type(
+                    "Result", (), {"returncode": 1, "stderr": "x" * 3000 + " failure detail"}
+                )()):
+            with self.assertRaises(watch.AIReviewError) as error:
+                watch.call_ai({}, "review instructions", "release diff")
+
+        self.assertIn("failure detail", str(error.exception))
+        self.assertLess(len(str(error.exception)), 2100)
 
     def test_ai_error_after_retries_raises_instead_of_returning_report_text(self):
         def http_error(request, timeout):
@@ -165,6 +179,17 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("1. Note contains {{repo}}.", report)
         self.assertNotIn("{{tag}}", report)
 
+    def test_p3_release_without_highlights_is_marked_unimportant(self):
+        meta, report = watch.format_release(
+            "coin", "owner/repo", {"tag_name": "v1"}, "v0",
+            "风险级别：P3\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+            "内存问题=无；安全=无；稳定性/数据=无\n"
+            "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+            "内存问题=无；安全=无；稳定性/数据=无\n未发现需要单独报告的重大变更。",
+        )
+        self.assertEqual(meta["importance"], "不重要")
+        self.assertIn("- 结论：**不重要**", report)
+
     def test_issue_summary_lists_all_coins_releases_and_deduplicates(self):
         def entry(coin, repo, tag):
             analysis = (
@@ -242,6 +267,31 @@ class WatchReleaseTests(unittest.TestCase):
         ])
         run.assert_not_called()
 
+    def test_local_issue_history_uses_public_api_without_gh_cli(self):
+        calls = []
+
+        def github_json(path):
+            calls.append(path)
+            return [{"body": "issue"}]
+
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "", "GH_TOKEN": ""}), \
+                patch.object(watch, "run", return_value="https://github.com/owner/watch.git") as run, \
+                patch.object(watch, "github_json", side_effect=github_json):
+            self.assertEqual(watch.github_issue_history(), [{"body": "issue"}])
+
+        run.assert_called_once_with("git", "remote", "get-url", "origin", cwd=watch.ROOT)
+        self.assertEqual(calls, ["repos/owner/watch/issues?state=all&per_page=100&page=1"])
+
+    def test_local_codex_can_skip_online_issue_history_but_actions_cannot(self):
+        with patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "", "AI_BACKEND": "codex_cli", "SKIP_GITHUB_ISSUE_HISTORY": "1",
+        }):
+            self.assertFalse(watch.should_read_github_issue_history())
+        with patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true", "AI_BACKEND": "codex_cli", "SKIP_GITHUB_ISSUE_HISTORY": "1",
+        }):
+            self.assertTrue(watch.should_read_github_issue_history())
+
     def test_local_codex_uses_github_issue_markers_to_skip_old_releases(self):
         old_keys = [
             ["tari", "tari-project/tari", "v6.4.0"],
@@ -259,10 +309,8 @@ class WatchReleaseTests(unittest.TestCase):
         original_root = watch.ROOT
 
         def run(*args, cwd=None):
-            if args[:3] == ("gh", "repo", "view"):
-                return "owner/watch\n"
-            if args[:3] == ("gh", "issue", "list"):
-                return json.dumps(issues)
+            if args == ("git", "remote", "get-url", "origin"):
+                return "https://github.com/owner/watch.git\n"
             raise AssertionError(f"Unexpected command: {args}")
 
         def release_diff(repo, previous, tag):
@@ -289,6 +337,7 @@ class WatchReleaseTests(unittest.TestCase):
                 }), patch.object(watch, "release_window_from_start", return_value=(
                     [{"tag_name": "v6.4.0"}, {"tag_name": "v6.5.0"}, {"tag_name": "v6.6.0"}], "v6.3.0",
                 )), patch.object(watch, "run", side_effect=run), \
+                        patch.object(watch, "github_json", return_value=issues), \
                         patch.object(watch, "release_diff", side_effect=release_diff), \
                         patch.object(watch, "ask_ai", return_value=analysis), patch("builtins.print"):
                     watch.main()
@@ -374,7 +423,7 @@ class WatchReleaseTests(unittest.TestCase):
                         }), \
                         patch.object(watch, "release_window_from_start", return_value=([{"tag_name": "v2"}], "v1")), \
                         patch.object(watch, "release_diff", return_value="diff"), \
-                        patch.object(watch, "run", return_value="[]"), \
+                        patch.object(watch, "github_json", return_value=[]), \
                         patch.object(watch, "ask_ai", side_effect=watch.AIReviewError("HTTP 503")), \
                         patch("builtins.print"):
                     watch.main()
@@ -417,6 +466,7 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertNotIn("Release note", report)
                 self.assertNotIn("Notes for v", report)
                 self.assertNotIn("src/one.rs", report)
+                self.assertNotIn("<!-- watch-release:", report)
                 self.assertEqual(report.count("- **重点标记：** 无"), 3)
                 self.assertEqual(report.count("1. Finding for v"), 3)
                 self.assertIn("restart at 1 for every new release", watch.SYSTEM_PROMPT)
@@ -436,7 +486,7 @@ class WatchReleaseTests(unittest.TestCase):
                 for tag in ("v1", "v2", "v3"):
                     watch.append_report_batch({"coin": {"owner/repo": [(
                         {"coin": "coin", "repo": "owner/repo", "tag": tag, "published_at": "2026-11-11T00:00:00Z"},
-                        f"#### {tag}\n",
+                        f"#### {tag}\n\n- 仓库：[`owner/repo`](https://github.com/owner/repo)\n",
                     )]}})
 
                 report_files = [path for path in watch.REPORTS.glob("*.md") if path.name != "index.md"]
