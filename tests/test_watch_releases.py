@@ -1,3 +1,4 @@
+import base64
 import io
 import importlib.util
 import json
@@ -57,6 +58,28 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(result, "analysis")
         self.assertEqual(calls, 2)
         sleep.assert_called_once_with(5)
+
+    def test_codex_cli_backend_uses_read_only_exec_and_captures_report(self):
+        captured = {}
+
+        def run(command, **kwargs):
+            captured["command"] = command
+            captured["prompt"] = kwargs["input"]
+            output = Path(command[command.index("--output-last-message") + 1])
+            output.write_text("Codex analysis", encoding="utf-8")
+            return type("Result", (), {"returncode": 0})()
+
+        with patch.dict(os.environ, {"AI_BACKEND": "codex_cli"}), \
+                patch.object(watch.shutil, "which", return_value="codex"), \
+                patch.object(watch.subprocess, "run", side_effect=run):
+            result = watch.call_ai({}, "review instructions", "release diff")
+
+        self.assertEqual(result, "Codex analysis")
+        self.assertIn("--sandbox", captured["command"])
+        self.assertIn("read-only", captured["command"])
+        self.assertIn("--ephemeral", captured["command"])
+        self.assertIn("review instructions", captured["prompt"])
+        self.assertIn("release diff", captured["prompt"])
 
     def test_ai_error_after_retries_raises_instead_of_returning_report_text(self):
         def http_error(request, timeout):
@@ -189,15 +212,97 @@ class WatchReleaseTests(unittest.TestCase):
         encoded = watch.base64.urlsafe_b64encode(json.dumps(releases).encode()).decode().rstrip("=")
         issues = [
             {"author": {"login": "github-actions[bot]"}, "body": f"<!-- watch-release-keys: {encoded} -->"},
-            {"author": {"login": "someone-else"}, "body": f"<!-- watch-release-keys: {encoded} -->"},
+            {"author": {"login": "repository-owner"}, "body": f"<!-- watch-release-keys: {encoded} -->"},
         ]
         original_reports = watch.REPORTS
         with tempfile.TemporaryDirectory() as temp_dir:
             watch.REPORTS = Path(temp_dir)
             try:
-                self.assertEqual(watch.reported_releases(issues), {releases[0]})
+                self.assertEqual(watch.reported_releases(issues), set(releases))
             finally:
                 watch.REPORTS = original_reports
+
+    def test_github_issue_history_uses_paginated_api_in_actions(self):
+        first_page = [{"number": number} for number in range(100)]
+        second_page = [{"number": 100}]
+        calls = []
+
+        def github_json(path):
+            calls.append(path)
+            return first_page if path.endswith("page=1") else second_page
+
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/watch", "GH_TOKEN": "token"}), \
+                patch.object(watch, "github_json", side_effect=github_json), \
+                patch.object(watch, "run") as run:
+            self.assertEqual(watch.github_issue_history(), first_page + second_page)
+
+        self.assertEqual(calls, [
+            "repos/owner/watch/issues?state=all&per_page=100&page=1",
+            "repos/owner/watch/issues?state=all&per_page=100&page=2",
+        ])
+        run.assert_not_called()
+
+    def test_local_codex_uses_github_issue_markers_to_skip_old_releases(self):
+        old_keys = [
+            ["tari", "tari-project/tari", "v6.4.0"],
+            ["tari", "tari-project/tari", "v6.5.0"],
+        ]
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(old_keys, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        issues = [{
+            "author": {"login": "github-actions[bot]"},
+            "body": f"<!-- watch-release-keys: {encoded} -->",
+        }]
+        diff_calls = []
+        original_reports = watch.REPORTS
+        original_root = watch.ROOT
+
+        def run(*args, cwd=None):
+            if args[:3] == ("gh", "repo", "view"):
+                return "owner/watch\n"
+            if args[:3] == ("gh", "issue", "list"):
+                return json.dumps(issues)
+            raise AssertionError(f"Unexpected command: {args}")
+
+        def release_diff(repo, previous, tag):
+            diff_calls.append((repo, previous, tag))
+            return "new diff"
+
+        analysis = (
+            "风险级别：P1\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+            "内存问题=无；安全=无；稳定性/数据=无\n"
+            "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+            "内存问题=无；安全=无；稳定性/数据=无\n1. New release finding"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            watch.ROOT = Path(temp_dir)
+            watch.REPORTS = watch.ROOT / "reports"
+            try:
+                with patch.dict(os.environ, {
+                    "AI_BACKEND": "codex_cli",
+                    "GITHUB_ACTIONS": "",
+                    "GITHUB_REPOSITORY": "",
+                    "GITHUB_OUTPUT": "",
+                }), patch.object(watch, "load_config", return_value={
+                    "coins": {"tari": {"repo": "tari-project/tari", "from_release": "v6.4.0"}},
+                }), patch.object(watch, "release_window_from_start", return_value=(
+                    [{"tag_name": "v6.4.0"}, {"tag_name": "v6.5.0"}, {"tag_name": "v6.6.0"}], "v6.3.0",
+                )), patch.object(watch, "run", side_effect=run), \
+                        patch.object(watch, "release_diff", side_effect=release_diff), \
+                        patch.object(watch, "ask_ai", return_value=analysis), patch("builtins.print"):
+                    watch.main()
+
+                self.assertEqual(diff_calls, [("tari-project/tari", "v6.5.0", "v6.6.0")])
+                reports = list(watch.REPORTS.glob("*.md"))
+                self.assertEqual(len(reports), 1)
+                report = reports[0].read_text(encoding="utf-8")
+                self.assertIn("#### v6.6.0", report)
+                self.assertNotIn("#### v6.4.0", report)
+                self.assertNotIn("#### v6.5.0", report)
+            finally:
+                watch.REPORTS = original_reports
+                watch.ROOT = original_root
 
     def test_prepare_issue_writes_summary_for_the_post_artifact_workflow_step(self):
         entry = watch.format_release(

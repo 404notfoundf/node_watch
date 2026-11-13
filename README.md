@@ -49,10 +49,12 @@ on:
 ```powershell
 python -m pip install -r requirements.txt
 $env:AI_API_KEY = "your-api-key"
+# 本地也可以改用已登录的 Codex CLI；启用后无需设置 AI_API_KEY。
+# $env:AI_BACKEND = "codex_cli"
 python .github/scripts/watch_releases.py
 ```
 
-完整报告中每个 Release 的 Markdown 版式由 [.github/scripts/upstream_release_report.md](.github/scripts/upstream_release_report.md) 控制；脚本负责分组和填入数据。本地运行发现新 Release 时会在 `reports/` 下为本轮生成一份报告，不会创建 Issue 或上传 Artifact。API 地址、模型和监控列表仍从 `config/watch.yaml` 读取。
+完整报告中每个 Release 的 Markdown 版式由 [.github/scripts/upstream_release_report.md](.github/scripts/upstream_release_report.md) 控制；脚本负责分组和填入数据。本地运行发现新 Release 时会在 `reports/` 下为本轮生成一份报告，不会创建 Issue 或上传 Artifact。默认使用 `config/watch.yaml` 中的 API；设置 `AI_BACKEND=codex_cli` 后改用本机已安装并登录的 Codex CLI，生成的报告仍保存在 `reports/`。本地 Codex 模式会读取当前 watcher 仓库的 Issue 去重标记，因此需要 `gh` 已安装并登录；若未设置 `GITHUB_REPOSITORY`，仓库名从当前目录的 GitHub remote 获取。GitHub Actions 不设置该变量，继续使用配置的 API。
 
 ## 检查范围
 
