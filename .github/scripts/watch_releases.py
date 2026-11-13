@@ -27,6 +27,26 @@ CONFIG = ROOT / "config" / "watch.yaml"
 REPORTS = ROOT / "reports"
 REPORT_TEMPLATE = Path(__file__).with_name("upstream_release_report.md")
 DIFF_CHUNK_CHARS = 120_000
+REVIEW_MODES = {"auto", "fast", "full"}
+FULL_REVIEW_NOTE_RE = re.compile(
+    r"hard[ -]?fork|硬分叉|共识|consensus|breaking[ -]?change|破坏性变更|"
+    r"security|漏洞|vulnerab|CVE|memory[ -]?(?:leak|exhaustion)|内存泄漏|OOM|"
+    r"data[ -]?loss|数据丢失|migration|迁移",
+    re.IGNORECASE,
+)
+SUSPICIOUS_DIFF_RE = re.compile(
+    r"\b(?:curl|wget|invoke-webrequest|downloadstring|os\.system|subprocess\.(?:run|call|popen)|"
+    r"child_process|powershell(?:\.exe)?|base64\.b64decode|eval\s*\(|exec\s*\()|"
+    r"(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token).*"
+    r"(?:http|upload|send|post)|(?:http|upload|send|post).*(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token)",
+    re.IGNORECASE,
+)
+SENSITIVE_PATH_RE = re.compile(
+    r"(?:consensus|validation|crypto|wallet|sign|auth|identity|p2p|rpc|network|comms|"
+    r"storage|database|migrat|chain|block|transaction|mempool|\.github/workflows/|"
+    r"(?:^|/)(?:Dockerfile|install|build|release|deploy)[^/]*)",
+    re.IGNORECASE,
+)
 ISSUE_KEYS_RE = re.compile(r"(?m)^<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->$")
 REPORT_COIN_RE = re.compile(r"^### (.+)$")
 REPORT_TAG_RE = re.compile(r"^#### (.+)$")
@@ -87,7 +107,16 @@ def load_config() -> dict:
         raise ValueError("coins must be a mapping")
     if not isinstance(data.get("ai", {}), dict):
         raise ValueError("ai must be a mapping")
+    if not isinstance(data.get("review", {}), dict):
+        raise ValueError("review must be a mapping")
     return data
+
+
+def configured_review_mode(config: dict) -> str:
+    mode = str(config.get("review", {}).get("mode", "auto")).lower()
+    if mode not in REVIEW_MODES:
+        raise ValueError("review.mode must be auto, fast, or full")
+    return mode
 
 
 def configured_repositories(config: dict):
@@ -166,6 +195,57 @@ def split_diff(diff: str, chunk_chars: int | None = None) -> list[str]:
         chunks.append(diff[start:end])
         start = end
     return chunks or [""]
+
+
+def diff_sections(diff: str) -> list[tuple[str, str]]:
+    sections = []
+    for section in re.split(r"(?=^diff --git )", diff, flags=re.MULTILINE):
+        if not section.startswith("diff --git "):
+            continue
+        match = re.match(r"diff --git a/(?:.+?) b/(.+)$", section.splitlines()[0])
+        if match:
+            sections.append((match.group(1), section))
+    return sections
+
+
+def suspicious_diff_hunks(diff: str) -> list[str]:
+    hunks = []
+    for path, section in diff_sections(diff):
+        lines = section.splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("+") and not line.startswith("+++") and SUSPICIOUS_DIFF_RE.search(line):
+                start, end = max(0, index - 3), min(len(lines), index + 4)
+                hunks.append("\n".join([f"File: {path}", *lines[start:end]]))
+    return hunks
+
+
+def review_mode(mode: str, release: dict, diff: str) -> str:
+    if mode != "auto":
+        return mode
+    if FULL_REVIEW_NOTE_RE.search(release.get("body") or "") or suspicious_diff_hunks(diff):
+        return "full"
+    return "fast"
+
+
+def fast_review_material(repo: str, release: dict, previous_tag: str | None, diff: str) -> str:
+    sections = diff_sections(diff)
+    changed_files = []
+    for path, section in sections:
+        added = sum(line.startswith("+") and not line.startswith("+++") for line in section.splitlines())
+        deleted = sum(line.startswith("-") and not line.startswith("---") for line in section.splitlines())
+        category = "核心路径" if SENSITIVE_PATH_RE.search(path) else "普通路径"
+        changed_files.append(f"- {path} (+{added}/-{deleted}, {category})")
+    suspicious = suspicious_diff_hunks(diff)
+    return "\n".join([
+        f"Repository: {repo}",
+        f"Release: {release.get('tag_name')}",
+        f"Compared with: {previous_tag or 'none'}",
+        "Review mode: FAST PRECHECK. The full diff was scanned locally for high-risk patterns, but is not supplied.",
+        "Do not claim unprovided code is safe. Only assess the release notes, changed-file inventory, and supplied suspicious snippets.",
+        "<untrusted_release_notes>", release.get("body") or "(empty)", "</untrusted_release_notes>",
+        "<changed_files>", "\n".join(changed_files) or "(no files)", "</changed_files>",
+        "<suspicious_diff_hunks>", "\n\n".join(suspicious) or "(none)", "</suspicious_diff_hunks>",
+    ])
 
 
 def call_codex_cli(system_prompt: str, material: str) -> str:
@@ -250,7 +330,10 @@ def call_ai(settings: dict, system_prompt: str, material: str) -> str:
         time.sleep(wait)
 
 
-def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, diff: str) -> str:
+def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, diff: str, review: str = "full") -> str:
+    if review == "fast":
+        print(f"Fast prechecking {repo} {release.get('tag_name')}.", flush=True)
+        return call_ai(settings, f"{SYSTEM_PROMPT}\n\n{str(settings.get('prompt', ''))}", fast_review_material(repo, release, previous_tag, diff))
     chunk_chars = settings.get("diff_chunk_chars", DIFF_CHUNK_CHARS)
     if type(chunk_chars) is not int or chunk_chars < 1:
         raise AIReviewError("AI 配置 diff_chunk_chars 必须是正整数。")
@@ -355,12 +438,25 @@ def importance(risk: str, highlights: str) -> str:
     return "不重要" if risk == "P3" and highlights == "无" else "需关注"
 
 
+def conclusion(risk: str, highlights: str) -> str:
+    if risk == "P0":
+        return "严重风险"
+    if risk == "P1":
+        return "重点关注"
+    if risk == "P2":
+        return "需关注"
+    if risk == "P3" and highlights == "无":
+        return "不重要"
+    return "待人工复核" if risk in {"待人工复核", "未标注"} else "需关注"
+
+
 def format_release(
     coin: str,
     repo: str,
     release: dict,
     previous_tag: str | None,
     analysis: str,
+    review: str = "full",
 ) -> tuple[dict, str]:
     tag = release["tag_name"]
     highlights = highlight_summary(analysis)
@@ -373,6 +469,8 @@ def format_release(
         "published_at": release.get("published_at", ""),
         "risk": risk,
         "importance": importance(risk, highlights),
+        "conclusion": conclusion(risk, highlights),
+        "review": "快速预检" if review == "fast" else "完整审查",
         "highlights": highlights,
         "highlight_reasons": highlight_reasons,
     }
@@ -385,6 +483,8 @@ def format_release(
         "comparison_start": previous_tag or "无更早 Release",
         "risk": meta["risk"],
         "importance": meta["importance"],
+        "conclusion": meta["conclusion"],
+        "review": meta["review"],
         "highlights": highlights,
         "highlight_reasons": highlight_reasons,
         "analysis": analysis_details or "（AI 未提供详细分析。）",
@@ -535,18 +635,22 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
         "# 上游 Release 更新摘要",
         "",
         f"本轮发现 **{len(releases)} 个新版本**，涉及 **{len(entries)} 个币种、{repo_count} 个仓库**。",
-        "",
-        "## 本轮版本清单",
-        "",
     ]
-    for coin, repo, meta in releases:
-        lines.append(
-            f"- **{coin}** · [`{repo}`](https://github.com/{repo}) · `{meta['tag']}` "
-            f"· {meta.get('importance', '需关注')} · AI 风险 `{meta['risk']}` · {meta.get('highlights', '未标注')}"
-        )
-        reasons = meta.get("highlight_reasons", "无")
-        if reasons != "无":
-            lines.append(f"  - 标记依据：{reasons}")
+    grouped = {
+        "需关注": [entry for entry in releases if entry[2].get("conclusion") != "不重要"],
+        "不重要（已检查）": [entry for entry in releases if entry[2].get("conclusion") == "不重要"],
+    }
+    for heading, grouped_releases in grouped.items():
+        if not grouped_releases:
+            continue
+        lines.extend(["", f"## {heading}", ""])
+        for coin, _repo, meta in grouped_releases:
+            highlights = meta.get("highlights", "未标注")
+            suffix = f" · {highlights}" if highlights != "无" else ""
+            lines.append(
+                f"- **{coin}** `{meta['tag']}` · {meta.get('review', '完整审查')} "
+                f"· {meta.get('conclusion', '待人工复核')}{suffix}"
+            )
     if pending_failures:
         lines.extend(["", f"> ⚠️ 另有 {pending_failures} 项检查未完成，尚未标记为已处理；请查看 Actions 日志，后续轮询会重试。"])
     mentions = notify_logins()
@@ -583,6 +687,7 @@ def set_workflow_output(name: str, value: str) -> None:
 def main() -> None:
     config = load_config()
     watched = list(configured_repositories(config))
+    default_review_mode = configured_review_mode(config)
     REPORTS.mkdir(parents=True, exist_ok=True)
     if not watched:
         set_workflow_output("failure_count", "0")
@@ -602,12 +707,13 @@ def main() -> None:
                     continue
                 try:
                     diff = release_diff(repo, previous, release["tag_name"])
-                    analysis = ask_ai(ai_settings(config.get("ai", {}), override), repo, release, previous, diff)
+                    selected_review = review_mode(default_review_mode, release, diff)
+                    analysis = ask_ai(ai_settings(config.get("ai", {}), override), repo, release, previous, diff, selected_review)
                 except AIReviewError as error:
                     failures.append(f"{repo} {release['tag_name']}: {error}")
                     previous = release["tag_name"]
                     continue
-                formatted = format_release(coin, repo, release, previous, analysis)
+                formatted = format_release(coin, repo, release, previous, analysis, selected_review)
                 new_entries.setdefault(coin, {}).setdefault(repo, []).append(formatted)
                 processed.add(key)
                 print(f"Recorded {repo} {release['tag_name']}")

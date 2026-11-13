@@ -142,6 +142,44 @@ class WatchReleaseTests(unittest.TestCase):
         with self.assertRaises(watch.AIReviewError):
             watch.ask_ai({"diff_chunk_chars": 0}, "owner/repo", {"tag_name": "v1"}, "v0", "diff")
 
+    def test_auto_review_uses_fast_for_routine_change_and_full_for_risk_signals(self):
+        routine_diff = "diff --git a/docs/readme.md b/docs/readme.md\n+++ b/docs/readme.md\n+Update docs\n"
+        self.assertEqual(watch.review_mode("auto", {"body": "Routine release"}, routine_diff), "fast")
+        self.assertEqual(watch.review_mode("auto", {"body": "Hard fork activation"}, routine_diff), "full")
+        suspicious_diff = "diff --git a/src/a.py b/src/a.py\n+++ b/src/a.py\n+subprocess.run(command)\n"
+        self.assertEqual(watch.review_mode("auto", {"body": "Routine release"}, suspicious_diff), "full")
+
+    def test_fast_review_sends_inventory_and_suspicious_hunks_not_full_diff(self):
+        diff = (
+            "diff --git a/src/worker.py b/src/worker.py\n+++ b/src/worker.py\n"
+            "+subprocess.run(command)\n context\n"
+            "diff --git a/docs/readme.md b/docs/readme.md\n+++ b/docs/readme.md\n+ordinary documentation\n"
+        )
+        material = watch.fast_review_material("owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", diff)
+        self.assertIn("src/worker.py (+1/-0, 普通路径)", material)
+        self.assertIn("docs/readme.md (+1/-0, 普通路径)", material)
+        self.assertIn("subprocess.run(command)", material)
+        self.assertNotIn("ordinary documentation", material)
+        self.assertIn("FAST PRECHECK", material)
+
+    def test_fast_ask_ai_makes_one_request(self):
+        captured = []
+
+        def urlopen(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "analysis"}}]}).encode())
+
+        with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
+                patch.object(watch.urllib.request, "urlopen", side_effect=urlopen):
+            result = watch.ask_ai(
+                {"api_url": "https://ai.example/v1", "model": "test"}, "owner/repo",
+                {"tag_name": "v1", "body": "notes"}, "v0", "diff --git a/a b/a\n+++ b/a\n+change\n", "fast",
+            )
+
+        self.assertEqual(result, "analysis")
+        self.assertEqual(len(captured), 1)
+        self.assertIn("FAST PRECHECK", captured[0]["messages"][1]["content"])
+
     def test_highlight_summary_marks_major_changes(self):
         analysis = (
             "重点标记：破坏性变更=待验证；硬分叉/共识=已确认；兼容性=待验证；"
@@ -174,6 +212,7 @@ class WatchReleaseTests(unittest.TestCase):
         )
         self.assertIn(f"- **重点标记：** {summary}", report)
         self.assertIn(f"- **标记依据：** {reasons}", report)
+        self.assertIn("- 审查模式：完整审查", report)
         self.assertNotIn("重点标记依据：", report)
         self.assertNotIn("省略", report)
         self.assertIn("1. Note contains {{repo}}.", report)
@@ -188,7 +227,8 @@ class WatchReleaseTests(unittest.TestCase):
             "内存问题=无；安全=无；稳定性/数据=无\n未发现需要单独报告的重大变更。",
         )
         self.assertEqual(meta["importance"], "不重要")
-        self.assertIn("- 结论：**不重要**", report)
+        self.assertEqual(meta["conclusion"], "不重要")
+        self.assertIn("- 审查结论：**不重要**", report)
 
     def test_issue_summary_lists_all_coins_releases_and_deduplicates(self):
         def entry(coin, repo, tag):
@@ -216,15 +256,17 @@ class WatchReleaseTests(unittest.TestCase):
 
         self.assertIn("3 个新版本", body)
         self.assertIn("2 个币种、2 个仓库", body)
+        self.assertIn("## 需关注", body)
         self.assertIn("**tari**", body)
         self.assertIn("**coin-b**", body)
-        self.assertIn("tari-project/tari", body)
+        self.assertNotIn("tari-project/tari", body)
         self.assertIn("`v6.2.0`", body)
         self.assertIn("`v1`", body)
         self.assertIn("`v2`", body)
         self.assertLess(body.index("**coin-b**"), body.index("**tari**"))
         self.assertIn("内存问题修复", body)
-        self.assertIn("  - 标记依据：**内存问题：** src/cache.rs 修复缓存未释放", body)
+        self.assertIn("完整审查", body)
+        self.assertNotIn("标记依据", body)
         self.assertNotIn("1. Finding", body)
         self.assertIn("/actions/runs/12345", body)
         self.assertIn("@owner", body)

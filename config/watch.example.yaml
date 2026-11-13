@@ -11,6 +11,11 @@ ai:
     各段结果会统一汇总；请合并重复发现，不要推测未提供代码的后果。只列出实质影响，
     忽略常规重构、文档、测试、普通依赖更新和低影响修复；每条发现控制在一两句话。
 
+# auto 同时用于 GitHub Actions 和本地 Codex CLI。
+# fast 只发送 Release note、文件清单和可疑片段；full 审查完整代码差异。
+review:
+  mode: auto
+
 coins:
   example_coin:
     repo: "owner/mining-node"

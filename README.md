@@ -20,6 +20,8 @@ coins:
 
 每个币种配置一个仓库，`repo` 使用 `owner/repository` 格式。`from_release` 必须是该仓库已发布的 GitHub Release tag；配置的版本会纳入分析，并与前一个 Release 比较。之后只处理尚未记录的 Release。工作流只读取 `config/watch.yaml`，示例文件不会自动加载。
 
+`review.mode` 同时作用于 GitHub Actions 和本地 Codex CLI。默认 `auto`：普通版本快速预检，只向 AI 发送 Release note、完整变更文件清单和本地扫描出的可疑代码片段；Release note 提到硬分叉、共识、破坏性变更、安全、内存或数据迁移，或 diff 出现下载执行、命令执行、疑似密钥外传等信号时，自动改为完整审查。`fast` 强制快速预检，`full` 强制审查完整 diff。报告会标明实际审查模式；快速预检不会宣称未发送的代码安全。
+
 AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。`diff_chunk_chars` 控制顺序审查时每个代码差异分段的字符数，默认建议 120,000；应根据所用模型的上下文窗口设置。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model`、`prompt` 和 `diff_chunk_chars`。
 
 可选地，在 **Settings → Secrets and variables → Actions → Variables** 设置 `NOTIFY_LOGINS`，填写逗号分隔的 GitHub 用户名以 @提及多个接收人。留空时默认 @提及仓库所有者；仓库属于组织时，组织账号提及不保证通知所有成员，建议填写具体用户。
