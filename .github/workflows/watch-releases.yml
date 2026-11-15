@@ -89,7 +89,6 @@ jobs:
           else
             git worktree add --detach "$PAGES_DIR" HEAD
             git -C "$PAGES_DIR" switch --orphan gh-pages
-            git -C "$PAGES_DIR" rm -rf -- .
           fi
       - name: Render report website
         id: render

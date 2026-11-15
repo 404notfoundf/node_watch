@@ -457,7 +457,10 @@ class WatchReleaseTests(unittest.TestCase):
         publish_steps = publish_job["steps"]
         watch_names = [step.get("name", "") for step in watch_steps]
         publish_names = [step.get("name", "") for step in publish_steps]
+        restore_history = next(step for step in publish_steps if step.get("name") == "Restore Pages history")
         self.assertNotIn("Commit reports", watch_names + publish_names)
+        self.assertIn('git -C "$PAGES_DIR" switch --orphan gh-pages', restore_history["run"])
+        self.assertNotIn('git -C "$PAGES_DIR" rm -rf -- .', restore_history["run"])
         self.assertLess(watch_names.index("Upload full report"), watch_names.index("Mark incomplete release checks"))
         self.assertLess(publish_names.index("Deploy report website"), publish_names.index("Create release summary Issue"))
         self.assertEqual(publish_job["needs"], "watch")
