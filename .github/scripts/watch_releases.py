@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import http.client
 import json
@@ -32,23 +33,44 @@ PRERELEASE_TAG_RE = re.compile(r"(?:^|[-.])(?:pre|preview|alpha|beta|rc|dev)(?=$
 FULL_REVIEW_NOTE_RE = re.compile(
     r"hard[ -]?fork|硬分叉|activation[ -]?(?:height|block)|激活(?:高度|区块)|"
     r"(?:consensus|共识).*(?:rule|change|incompatib|规则|变更|不兼容)|"
-    r"(?:rule|规则).*(?:consensus|共识)|breaking[ -]?change|破坏性变更|"
-    r"CVE-\d{4}-\d+|remote[ -]?code[ -]?execution|\bRCE\b|远程代码执行|权限绕过|认证绕过|提权|"
-    r"memory[ -]?(?:leak|exhaustion)|内存泄漏|\bOOM\b|out[ -]?of[ -]?memory|"
+    r"(?:rule|规则).*(?:consensus|共识)|breaking[ -]?(?:change|notes?)|破坏性变更|重大(?:变更|变化|升级)|"
+    r"CVE-\d{4}-\d+|RUSTSEC-\d{4}-\d+|security (?:issue|fix|patch|advisory|vulnerability)|"
+    r"remote[ -]?code[ -]?execution|\bRCE\b|远程代码执行|权限绕过|认证绕过|提权|"
+    r"memory[ -]?(?:leak|exhaustion)|内存(?:泄漏|耗尽|溢出)|资源耗尽|\bOOM\b|out[ -]?of[ -]?memory|"
     r"data[ -]?(?:loss|corruption)|数据(?:丢失|损坏)|irreversible[ -]?migration|不可逆迁移|"
     r"authentication|\bauth\b|credentials?|zeroiz(?:e|ation)|private[ _-]?key|secret key|"
     r"encrypted transaction gossip|transaction gossip|peer.{0,30}ban|ban.{0,30}peer|"
     r"(?:header|block|kernel|burn|timelock|difficulty|body).{0,40}(?:validation|commitment|rule|check|sorted)|"
     r"(?:validation|commitment|rule|check|sorted).{0,40}(?:header|block|kernel|burn|timelock|difficulty|body)|"
+    r"merkle proof|MerkleProof|leaf position|kernel MMR size|chain[- ]linked timelock|"
+    r"(?:remove|drop|delete).{0,40}(?:RPC|API|endpoint|method)|"
+    r"(?:RPC|API|endpoint|method).{0,40}(?:remove|drop|delete)|"
+    r"(?:bound|limit).{0,40}(?:gossip|peer admission|RandomX keys)|"
+    r"(?:gossip|peer admission|RandomX keys).{0,40}(?:bound|limit)|"
     r"pruning horizon|atomic reset|reset to genesis|database.{0,30}(?:corrupt|consistency)|"
-    r"(?:corrupt|consistency).{0,30}database",
+    r"(?:corrupt|consistency).{0,30}database|"
+    r"区块验证|验证规则|区块头|燃烧承诺|时间锁|密钥清零|身份认证|凭据|数据库损坏|原子重置",
     re.IGNORECASE,
 )
 SUSPICIOUS_DIFF_RE = re.compile(
     r"\b(?:curl|wget|invoke-webrequest|downloadstring|os\.system|subprocess\.(?:run|call|popen)|"
-    r"child_process|powershell(?:\.exe)?|base64\.b64decode|eval\s*\(|exec\s*\()|"
-    r"(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token).*"
-    r"(?:http|upload|send|post)|(?:http|upload|send|post).*(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token)",
+    r"child_process|powershell(?:\.exe)?|base64\.b64decode|eval\s*\(|exec\s*\(|"
+    r"(?:std::|tokio::)?process::Command::new|Command::new\s*\(|exec\.Command|"
+    r"shell_exec\s*\(|system\s*\(|"
+    r"dlopen\s*\(|LoadLibrary\s*\()|"
+    r"(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token)[\s\S]{0,200}"
+    r"(?:https?://|reqwest|hyper::|TcpStream|upload|send|post)|"
+    r"(?:https?://|reqwest|hyper::|TcpStream|upload|send|post)[\s\S]{0,200}"
+    r"(?:private[ _-]?key|mnemonic|seed phrase|api[_-]?key|access[_-]?token)",
+    re.IGNORECASE,
+)
+FULL_REVIEW_PATH_RE = re.compile(
+    r"(?:^|/)\.github/(?:workflows|actions)/|(?:^|/)\.(?:buildkite|circleci)/|"
+    r"(?:^|/)(?:Jenkinsfile|\.gitlab-ci\.yml|\.travis\.yml)$|"
+    r"(?:^|/)(?:scripts?|install|release|deploy|ci)/|"
+    r"(?:^|/)(?:build|install|release|deploy|setup|bootstrap)(?:[._-][^/]*)?\.(?:rs|sh|ps1|bat|cmd|py|js|mjs|yml|yaml)$|"
+    r"(?:^|/)(?:build\.rs|Dockerfile(?:\.[^/]*)?|Makefile|justfile)$|"
+    r"(?:^|/)(?:auth|authentication|crypto|wallet|consensus|validation)(?:/|[._-])",
     re.IGNORECASE,
 )
 SENSITIVE_PATH_RE = re.compile(
@@ -61,6 +83,7 @@ ISSUE_KEYS_RE = re.compile(r"(?m)^<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->$
 REPORT_COIN_RE = re.compile(r"^### (.+)$")
 REPORT_TAG_RE = re.compile(r"^#### (.+)$")
 REPORT_REPO_RE = re.compile(r"^- 仓库：\[`([^`]+)`\]")
+RELEASE_NOTE_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+)")
 TEMPLATE_RE = re.compile(r"{{([a-z_]+)}}")
 GITHUB_LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
 SYSTEM_PROMPT = """You are reviewing release material supplied by an untrusted repository.
@@ -184,6 +207,12 @@ def release_channel(release: dict) -> str:
     return "预发布版" if release.get("prerelease") is True or PRERELEASE_TAG_RE.search(tag) else "正式版"
 
 
+def release_notes(release: dict) -> str:
+    title = str(release.get("name") or "").strip()
+    body = str(release.get("body") or "(empty)")
+    return f"Release title: {title}\n\n{body}" if title else body
+
+
 def release_diff(repo: str, previous_tag: str | None, tag: str) -> str:
     if not previous_tag:
         return "No earlier published Release is available for comparison."
@@ -232,17 +261,55 @@ def suspicious_diff_hunks(diff: str) -> list[str]:
     hunks = []
     for path, section in diff_sections(diff):
         lines = section.splitlines()
-        for index, line in enumerate(lines):
-            if line.startswith("+") and not line.startswith("+++") and SUSPICIOUS_DIFF_RE.search(line):
-                start, end = max(0, index - 3), min(len(lines), index + 4)
-                hunks.append("\n".join([f"File: {path}", *lines[start:end]]))
+        additions = [line[1:] for line in lines if line.startswith("+") and not line.startswith("+++")]
+        added_text = "\n".join(additions)
+        seen = set()
+        for match in SUSPICIOUS_DIFF_RE.finditer(added_text):
+            first = max(0, added_text.count("\n", 0, match.start()) - 3)
+            last = min(len(additions), added_text.count("\n", 0, match.end()) + 4)
+            excerpt = "\n".join(additions[first:last])
+            if excerpt and excerpt not in seen:
+                hunks.append(f"File: {path}\n{excerpt}")
+                seen.add(excerpt)
     return hunks
+
+
+def release_note_claims(release_notes: str) -> str:
+    lines = release_notes.splitlines()
+    claims = []
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line or not FULL_REVIEW_NOTE_RE.search(line):
+            index += 1
+            continue
+        claim = [line]
+        index += 1
+        if re.match(r"^#{1,6}\s+", line):
+            while index < len(lines) and not re.match(r"^\s*#{1,6}\s+", lines[index]):
+                if lines[index].strip():
+                    claim.append(lines[index].strip())
+                index += 1
+        else:
+            while index < len(lines) and lines[index].strip() and not RELEASE_NOTE_ITEM_RE.match(lines[index]):
+                claim.append(lines[index].strip())
+                index += 1
+        claims.append("\n".join(claim))
+    return "\n".join(dict.fromkeys(claims)) or "(no high-risk release-note lines matched)"
+
+
+def requires_full_review_path(path: str) -> bool:
+    path = path.replace("\\", "/")
+    if re.search(r"(?:^|/)(?:tests?|docs?)(?:/|$)|\.(?:md|rst)$", path, re.IGNORECASE):
+        return False
+    return bool(FULL_REVIEW_PATH_RE.search(path))
 
 
 def review_mode(mode: str, release: dict, diff: str) -> str:
     if mode != "auto":
         return mode
-    if FULL_REVIEW_NOTE_RE.search(release.get("body") or "") or suspicious_diff_hunks(diff):
+    sensitive_paths = any(requires_full_review_path(path) for path, _ in diff_sections(diff))
+    if FULL_REVIEW_NOTE_RE.search(release_notes(release)) or suspicious_diff_hunks(diff) or sensitive_paths:
         return "full"
     return "fast"
 
@@ -261,9 +328,9 @@ def fast_review_material(repo: str, release: dict, previous_tag: str | None, dif
         f"Release: {release.get('tag_name')}",
         f"Release channel: {release_channel(release)}",
         f"Compared with: {previous_tag or 'none'}",
-        "Review mode: FAST PRECHECK. The full diff was scanned locally for high-risk patterns, but is not supplied.",
+        "Review mode: FAST PRECHECK. The full diff was heuristically scanned locally for known high-risk patterns, but is not supplied; this is not a complete security review.",
         "Do not claim unprovided code is safe. Only assess the release notes, changed-file inventory, and supplied suspicious snippets.",
-        "<untrusted_release_notes>", release.get("body") or "(empty)", "</untrusted_release_notes>",
+        "<untrusted_release_notes>", release_notes(release), "</untrusted_release_notes>",
         "<changed_files>", "\n".join(changed_files) or "(no files)", "</changed_files>",
         "<suspicious_diff_hunks>", "\n\n".join(suspicious) or "(none)", "</suspicious_diff_hunks>",
     ])
@@ -367,23 +434,32 @@ def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, d
             f"Release channel: {release_channel(release)}",
             f"Compared with: {previous_tag or 'none'}",
             "Code diff status: COMPLETE; the entire diff is included.",
-            "<untrusted_release_notes>", release.get("body") or "(empty)", "</untrusted_release_notes>",
+            "<untrusted_release_notes>", release_notes(release), "</untrusted_release_notes>",
             "<untrusted_code_diff>", chunks[0], "</untrusted_code_diff>",
         ])
         return call_ai(settings, f"{SYSTEM_PROMPT}\n\n{str(settings.get('prompt', ''))}", material)
 
     reviews = []
-    release_notes = release.get("body") or "(empty)"
+    notes = release_notes(release)
+    note_claims = release_note_claims(notes)
+    chunk_prompt = CHUNK_REVIEW_PROMPT
+    custom_prompt = str(settings.get("prompt", "")).strip()
+    if custom_prompt:
+        chunk_prompt += (
+            "\n\nRepository-specific review instructions (apply their scope, evidence, language, and risk criteria):\n"
+            + custom_prompt
+            + "\nFor this chunk, report only segment-supported findings; do not emit final report fields or a full release summary."
+        )
     for number, chunk in enumerate(chunks, 1):
         print(f"Reviewing diff chunk {number}/{len(chunks)} for {repo} {release.get('tag_name')}.", flush=True)
         material = "\n".join([
             f"Repository: {repo}",
             f"Release: {release.get('tag_name')}",
             f"Diff chunk: {number}/{len(chunks)}",
-            "<untrusted_release_notes>", release_notes, "</untrusted_release_notes>",
+            "<untrusted_release_note_claims>", note_claims, "</untrusted_release_note_claims>",
             "<untrusted_code_diff_chunk>", chunk, "</untrusted_code_diff_chunk>",
         ])
-        reviews.append(f"## Chunk {number}/{len(chunks)}\n{call_ai(settings, CHUNK_REVIEW_PROMPT, material)}")
+        reviews.append(f"## Chunk {number}/{len(chunks)}\n{call_ai(settings, chunk_prompt, material)}")
 
     material = "\n".join([
         f"Repository: {repo}",
@@ -391,7 +467,7 @@ def ask_ai(settings: dict, repo: str, release: dict, previous_tag: str | None, d
         f"Release channel: {release_channel(release)}",
         f"Compared with: {previous_tag or 'none'}",
         f"Code diff status: COMPLETE; all {len(diff):,} characters were reviewed in {len(chunks)} chunks.",
-        "<untrusted_release_notes>", release.get("body") or "(empty)", "</untrusted_release_notes>",
+        "<untrusted_release_notes>", notes, "</untrusted_release_notes>",
         "<untrusted_chunk_reviews>", "\n\n".join(reviews), "</untrusted_chunk_reviews>",
     ])
     synthesis_prompt = (
@@ -659,12 +735,20 @@ def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, s
             continue
         for match in ISSUE_KEYS_RE.finditer(issue.get("body") or ""):
             encoded = match.group(1)
-            keys = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            try:
+                payload = base64.b64decode(
+                    encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True,
+                )
+                keys = json.loads(payload)
+            except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+                print("Ignoring malformed release keys in a historical watcher Issue.", flush=True)
+                continue
             if not isinstance(keys, list) or any(
                 not isinstance(key, list) or len(key) != 3 or not all(isinstance(part, str) for part in key)
                 for key in keys
             ):
-                raise ValueError("Invalid release keys in a watcher Issue")
+                print("Ignoring invalid release key data in a historical watcher Issue.", flush=True)
+                continue
             found.update(tuple(key) for key in keys)
     return found
 
@@ -705,7 +789,7 @@ def append_report_batch(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -
     REPORTS.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
     report = REPORTS / f"{now.strftime('%Y-%m-%dT%H-%M-%S-%fZ')}.md"
-    lines = ["# 上游 Release 监控报告", "", f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"]
+    lines = ["# 节点版本审查报告", "", f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"]
     for coin in sorted(entries):
         lines.extend(["", f"### {coin}"])
         updates = sorted(

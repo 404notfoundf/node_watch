@@ -56,7 +56,7 @@ def render_report(markdown: str, report_id: str) -> tuple[str, dict]:
     clean_markdown = REPORT_MARKER_RE.sub("", markdown).strip()
     batch_match = re.search(r"(?m)^## 检查批次\s+(.+)$", clean_markdown)
     batch = batch_match.group(1).strip() if batch_match else "未知批次"
-    title = f"上游 Release 监控报告 · {batch}"
+    title = f"节点版本审查报告 · {batch}"
     body_html = MarkdownIt("default", {"html": False}).render(clean_markdown)
     body = (
         '<header><div class="container"><a href="../../index.html">← 报告列表</a></div></header>'
@@ -123,7 +123,7 @@ def write_index(site_dir: Path) -> None:
         )
     report_list = "\n".join(rows) or "<li>暂无报告</li>"
     body = (
-        '<header><div class="container"><strong>上游 Release 监控</strong></div></header>'
+        '<header><div class="container"><strong>节点版本审查</strong></div></header>'
         '<main class="container"><section class="card">'
         '<h1>完整审查报告</h1>'
         '<p class="meta">每轮报告按币种和 Release 版本分组。</p>'
@@ -134,19 +134,29 @@ def write_index(site_dir: Path) -> None:
     if report_index.is_symlink():
         raise ValueError("Pages report index must not be a symlink")
     report_index.write_text(
-        page("上游 Release 监控报告", body), encoding="utf-8"
+        page("节点版本审查报告", body), encoding="utf-8"
     )
     root_index = site_dir / "index.html"
     if root_index.is_symlink():
         raise ValueError("Pages root index must not be a symlink")
-    if not root_index.exists():
+    replace_root = not root_index.exists()
+    if root_index.exists():
+        try:
+            current_root = root_index.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            current_root = ""
+        replace_root = "<!-- node-version-report-root -->" in current_root or (
+            "<h1>上游 Release 监控</h1>" in current_root and 'href="release-reports/"' in current_root
+        )
+    if replace_root:
         root_body = (
+            "<!-- node-version-report-root -->"
             '<main class="container"><section class="card">'
-            '<h1>上游 Release 监控</h1>'
+            '<h1>节点版本审查</h1>'
             '<p><a href="release-reports/">查看完整审查报告</a></p>'
             '</section></main>'
         )
-        root_index.write_text(page("上游 Release 监控", root_body), encoding="utf-8")
+        root_index.write_text(page("节点版本审查", root_body), encoding="utf-8")
 
 
 def publish_report(report_dir: Path, site_dir: Path, run_id: str, attempt: str, retention_days: int) -> str:

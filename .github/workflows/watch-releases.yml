@@ -1,4 +1,4 @@
-name: Watch upstream releases
+name: 节点版本审查
 
 on:
   schedule:

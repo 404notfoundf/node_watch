@@ -20,7 +20,7 @@ coins:
 
 每个币种配置一个仓库，`repo` 使用 `owner/repository` 格式。`running_version` 必须是矿池当前实际运行、且已发布的 GitHub Release tag；脚本只分析比它新的 Release，并按版本顺序逐个比较差异。升级矿池节点后，请同步更新该值，后续报告会以新版本作为比较起点。工作流只读取 `config/watch.yaml`，示例文件不会自动加载。
 
-`review.mode` 同时作用于 GitHub Actions 和本地 Codex CLI。默认 `auto` 对预发布版和正式版使用相同的风险判断：普通更新快速预检，只向 AI 发送 Release note、完整变更文件清单和本地扫描出的可疑代码片段；发行说明涉及硬分叉、共识/区块验证、认证凭据、密钥清零、交易 gossip 封禁、内存泄漏/OOM、数据库损坏或重置等风险，或 diff 出现下载执行、命令执行、疑似密钥外传等信号时，自动改为完整审查。`fast` 强制快速预检，`full` 强制审查完整 diff。报告会标明实际审查模式；快速预检不会宣称未发送的代码安全。`review.max_releases_per_run` 默认是 `3`，限制单轮最多审查的新版本数；剩余版本会在下一轮继续，避免积压版本拖慢单次工作流。
+`review.mode` 同时作用于 GitHub Actions 和本地 Codex CLI。默认 `auto` 对预发布版和正式版使用相同的风险判断，并读取 Release 标题和正文：普通更新快速预检，只向 AI 发送发行说明、完整变更文件清单和本地启发式扫描发现的可疑代码片段；发行说明涉及硬分叉、共识/区块验证、认证凭据、密钥清零、交易 gossip 封禁、内存泄漏/OOM、数据库损坏或重置等风险，diff 新增命令执行或疑似密钥外传代码，或变更 Actions、构建/安装/发布脚本及认证、加密、钱包、共识、验证路径时，自动改为完整审查。该本地扫描只覆盖已知风险特征，不等同完整安全审查。大差异分段时，每段只发送命中的重大发行说明条目和自定义审查要求，最终汇总仍收到完整发行说明。`fast` 强制快速预检，`full` 强制审查完整 diff。报告会标明实际审查模式；快速预检不会宣称未发送的代码安全。`review.max_releases_per_run` 默认是 `3`，限制单轮最多审查的新版本数；剩余版本会在下一轮继续，避免积压版本拖慢单次工作流。
 
 AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。`diff_chunk_chars` 控制顺序审查时每个代码差异分段的字符数，默认建议 120,000；应根据所用模型的上下文窗口设置。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model`、`prompt` 和 `diff_chunk_chars`。
 
@@ -32,7 +32,7 @@ AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的
 2. 按上文填写 `config/watch.yaml` 并添加 `AI_API_KEY` Secret。
 3. 在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。Pages 报告是公开网页。
 4. 在仓库 **Settings → Actions → General → Workflow permissions** 允许工作流 token 写入仓库内容；工作流会把历史网页保存在 `gh-pages` 分支，另外使用 `issues: write` 创建汇总 Issue、使用 Pages 部署权限发布网页。可设置 `NOTIFY_LOGINS` 指定通知用户；未设置时默认提及仓库所有者。
-5. 打开 **Actions → Watch upstream releases → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；发现更新时先上传完整报告 Artifact、发布网页，再创建带在线报告链接的汇总 Issue。已处理版本记录在 Issue 中，避免重复报告。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
+5. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；发现更新时先上传完整报告 Artifact、发布网页，再创建带在线报告链接的汇总 Issue。已处理版本记录在 Issue 中，避免重复报告。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
 
 调整轮询频率时，编辑 [.github/workflows/watch-releases.yml](.github/workflows/watch-releases.yml) 中的 `schedule`。例如每 15 分钟运行一次：
 
