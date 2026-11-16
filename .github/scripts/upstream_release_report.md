@@ -1,17 +1,17 @@
-#### {{tag}}
+#### {{tag}} · {{release_channel}} · {{review}}
 
-- 仓库：[`{{repo}}`](https://github.com/{{repo}})
-- 发布日期：{{published_at}}
-- 版本类型：{{release_channel}}
-- Release：[打开发布页]({{release_url}})
-- 代码比较：`{{comparison_start}}` → `{{tag}}`
-- 审查模式：{{review}}
-- 审查结论：**{{conclusion}}**
-- **升级建议：** {{upgrade_advice}}
-- **建议理由：** {{upgrade_reason}}
 - **重点标记：** {{highlights}}
-- **标记依据：** {{highlight_reasons}}
+- **处置建议：** {{upgrade_advice}} · {{conclusion}}
+- **建议理由：** {{upgrade_reason}}
+
+##### 重点标记依据
+
+{{highlight_reason_details}}
 
 ##### AI 审查
 
 {{analysis}}
+
+##### 版本信息
+
+发布于 {{published_at}} · 比较 `{{comparison_start}}` → `{{tag}}` · [打开 Release]({{release_url}})
