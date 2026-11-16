@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>节点版本审查报告 · 2026-11-16 15:54:28 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>节点版本审查报告</h1>
+<h2>检查批次 2026-11-16 15:54:28 UTC</h2>
+<h3>tari</h3>
+<h4>v6.3.0-pre.2 · 预发布版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: tari-project/tari --&gt;</p>
+<ul>
+<li><strong>重点标记：</strong> 🚨 <strong>破坏性变更</strong>（已确认） · 🚨 <strong>重大共识变更</strong>（已确认） · 🚨 <strong>兼容性</strong>（已确认） · ✅ <strong>安全</strong>（修复） · 🚨 <strong>稳定性/数据</strong>（风险）</li>
+<li><strong>处置建议：</strong> 预发布版重大事项 · 重点关注</li>
+<li><strong>建议理由：</strong> 已确认硬分叉或重大共识变更，应核对网络生效条件和节点兼容要求。 当前为预发布版，不建议直接用于生产升级；应评估现网影响并跟进正式版。</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li>
+<p>共识验证规则变更（#8193）：<code>blockchain_database.rs</code> 的 <code>inputs_and_outputs_match_header</code> 现要求 inputs/outputs/kernels 排序且唯一，移动 coinbase 或反转顺序的 block 不再被视为 header 承诺的 body 且提供方被 ban（<code>tests/node_comms_interface.rs</code>、<code>tests/block_sync.rs</code> 覆盖）。发行说明未声明硬分叉、激活高度或分叉时间点。</p>
+</li>
+<li>
+<p>验证裁决变化（#8191）：<code>aggregate_body_chain_validator.rs</code> 的 <code>find_unknown_inputs</code> 改为接受花费本 body 内重建输出的输入，裁决不再依赖节点保留的已花费历史，配套 <code>validation/error.rs</code> 新增 <code>ValidationError::SpentInputs</code>（不产生 ban 理由）及 <code>validation/helpers.rs</code> 的 <code>check_input_is_utxo</code> 改用 <code>contains_output_hash</code>，内存池接受花费再创建输出的交易而区块层双花仍被拒。</p>
+</li>
+<li>
+<p>破坏性变更/数据迁移：<code>ValidatorNodeEntry</code> 新增必填字段 <code>original_registration</code>（<code>lmdb_db.rs</code> 写入），旧条目反序列化直接失败并提示 “the chain database must be resynced”。从 v6.3.0-pre.1 升级且链库含验证节点条目的节点必须重新同步链库，既有同步状态无法保留。</p>
+</li>
+<li>
+<p>同步链选择与对端惩罚（#8160）：<code>base_layer/core/src/base_node/sync/header_sync/synchronizer.rs</code> 对短批次新增 claimed difficulty 校验，超报累计难度返回 <code>PeerSentInaccurateChainMetadata</code> 并惩罚对端，同时取消短批次前的提前换链，防止经短批次诱导切换到超报难度的分叉。</p>
+</li>
+<li>
+<p>mempool 中继与封禁策略（#8173、#8187）：<code>mempool/service/inbound_handlers.rs</code> 直接丢弃加密交易 gossip，明文消息来源一律 <code>ban_peer</code>；<code>mempool/mempool_storage.rs</code> 仅对 <code>height_dependent: true</code> 的输入脚本失败免禁，内核签名、range proof 等失败施加长封禁，混合网络中对端被封禁会更激进。</p>
+</li>
+<li>
+<p>gRPC 安全修复（#8170、#8166）：<code>basic_auth.rs</code> 以常量时间比较取代每请求 Argon2id 并新增每 IP 失败退避（5 次失败触发、指数退避封顶 60 秒、上限 1024 IP、回环豁免），口令改为 <code>Zeroizing&lt;Vec&lt;u8&gt;&gt;</code> 明文驻留内存（已披露的权衡）。<code>conversions/unblinded_output.rs</code> 在所有退出路径清零 <code>spending_key</code>/<code>script_private_key</code> 并脱敏 Debug。</p>
+</li>
+<li>
+<p>数据完整性修复：<code>horizon_state_sync/synchronizer.rs</code>、<code>db_transaction.rs</code> 的 <code>HorizonStateTreeUpdate.replaces_value</code> 与 <code>lmdb_db.rs</code> 剪枝逻辑处理同一 tranche 内“花费+重挖相同输出”的状态树覆盖与实例删除，避免剪枝误删重挖实例。</p>
+</li>
+<li>
+<p>依赖审计明示风险（#8186）：<code>deny.toml</code> 忽略 <code>RUSTSEC-2026-0387</code>（crypto-bigint 0.5 恒定时间路径含秘密相关分支），说明其仅经 <code>pgp</code> 用于 auto-update 哈希文件的公钥验签且无秘密标量运算，属上游明示接受的遗留风险。</p>
+</li>
+<li>
+<p>首次配置默认值变更（#8123）：<code>common/src/configuration/bootstrap.rs</code> 与 <code>configuration/utils.rs</code> 中首次生成配置的 “mine (y/N)” 空行/非交互默认由“是”改为“否”，新装节点默认不再启用挖矿及随之暴露的 gRPC 方法集合；同条目所述的非 TTY CPU 自旋修复本身在已提供证据中未见对应实现。</p>
+</li>
+</ol>
+<p><strong>待核实的发行说明主张</strong></p>
+<ol start="10">
+<li>#8194：发行说明称 “bundle Tor 0.4.9.15 so the base node no longer exits on the current Tor consensus”（修复当前 Tor 共识下基础节点直接退出），已提供的审查证据未报告对应实现，代码影响未核实。</li>
+<li>#8174：发行说明称 “keep walking an orphan's ancestry above the main tip”，孤儿块祖先遍历修复的代码影响未核实。</li>
+<li>#8175：发行说明称 “output index consistency”，输出索引一致性修复的代码影响未核实。</li>
+<li>#8030：发行说明称 “back up corrupt identity files before regenerating”，损坏身份文件备份行为的代码影响未核实。</li>
+<li>#8192：发行说明称 “handle stratum responses without a method field”，矿工 stratum 响应解析修复的代码影响未核实。</li>
+</ol>
+<p>本版本为预发布版（v6.3.0-pre.2），不建议直接部署到生产环境；若从 v6.3.0-pre.1 升级，请先评估链库强制重新同步的成本（见第 3 项）。</p>
+<h5>版本信息</h5>
+<p>发布于 2026-10-29T01:28:17Z · 比较 <code>v6.3.0-pre.1</code> → <code>v6.3.0-pre.2</code> · <a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.2">打开 Release</a></p>
+<h4>v6.3.0-pre.4 · 预发布版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: tari-project/tari --&gt;</p>
+<ul>
+<li><strong>重点标记：</strong> 🚨 <strong>破坏性变更</strong>（已确认） · 🚨 <strong>重大共识变更</strong>（已确认） · 🚨 <strong>兼容性</strong>（已确认） · 🚨 <strong>内存问题风险</strong> · 🚨 <strong>安全</strong>（风险） · ✅ <strong>稳定性/数据</strong>（修复）</li>
+<li><strong>处置建议：</strong> 预发布版重大事项 · 重点关注</li>
+<li><strong>建议理由：</strong> 已确认硬分叉或重大共识变更，应核对网络生效条件和节点兼容要求。 当前为预发布版，不建议直接用于生产升级；应评估现网影响并跟进正式版。</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li>共识规则收紧：<code>header_full_validator.rs</code> 新增 <code>check_kernel_mmr_size</code>，<code>kernel_mmr_size &lt;= prev_header.kernel_mmr_size</code> 的头被拒（<code>KernelMmrSizeNotIncreasing</code>，长封禁）。发行说明未声明硬分叉，但不同版本节点对相同头的接受判定可能分歧，属共识变更。</li>
+<li>共识/时间锁语义变更：<code>aggregate_body_chain_validator.rs</code> 的 <code>verify_timelocks</code> 由 <code>min_spendable_height &gt; current_height+1</code> 改为 <code>&gt; current_height</code>，按区块出块高度校验，原先可进入该区块的临界时间锁交易现在被拒。</li>
+<li>共识校验收紧：<code>check_total_burned</code>（链链接与内部校验器）及 <code>transaction_builder</code> 新增拒绝非 burn kernel 携带 <code>burn_commitment</code> 的规则，带该字段的旧式交易/区块被拒。</li>
+<li>共识相关难度校验修正：<code>validation/difficulty_calculator.rs</code> 改用 <code>chain_context.vm_key()</code> 对副链/孤儿头按其自身链的 RandomX VM key 校验难度，删除原 “KNOWN OPEN ISSUE” 行为，副链头的难度接受判定随之改变。</li>
+<li>破坏性变更（gRPC 认证）：<code>basic_auth.rs::BasicAuthCredentials::new</code> 拒绝用户名含 <code>:</code>，<code>server_interceptor.rs</code> 对该配置进入 <code>reject_all</code>，升级后含此用户名的既有配置下全部 gRPC 请求（含挖矿接口）返回 Unauthenticated，需改配置；<code>generate_header</code> 亦拒绝非 UTF-8 密码，<code>grpc_authentication.rs</code> 密码序列化改写为 <code>&lt;redacted&gt;</code> 且反序列化拒绝该占位符，配置序列化-回读流程会失败。</li>
+<li>数据/运维（#8260、#8263）：<code>lmdb_db.rs</code> 的 <code>reset_chain_to_genesis</code>/<code>MetadataKey::LostHeaderTip</code> 使剪枝节点越过剪枝高度的回退变为单次写入的整链重置到创世，孤儿清空、节点需从头重新同步（失败的重置不动库）。</li>
+<li>安全修复：<code>base_layer/mmr/src/merkle_proof.rs</code> 的 <code>MerkleProof::verify</code> 新增拒绝非叶位置与 <code>pos &gt;= mmr_size</code>，<code>find_leaf_index</code> 改为逐叶比较，修复叶哈希与父节点哈希碰撞时的查找错误，伪造/越界证明现被拒。</li>
+<li>安全/内存风险：<code>.cargo/audit.toml</code> 新增豁免 <code>RUSTSEC-2026-0459</code>（bundled SQLite &lt; 3.54.0 配合构造的 <code>-wal</code> 文件可返回未初始化页缓存内存），理由是 <code>diesel</code> 限制 <code>libsqlite3-sys &lt; 0.39</code>，属有意接受的风险，<code>minotari_utils dbstats</code> 打开不可信 DB 时可触发。</li>
+<li>稳定性修复：<code>blockchain_database.rs</code> 的 <code>verify_blockchain_consistency_for_height</code>/<code>rewind_if_still_corrupt</code> 与 <code>ChainStorageError::is_storage_access_failure</code> 区分存储访问失败和真实损坏，避免健康库被误报损坏并触发回滚。</li>
+<li>矿工影响（#8244）：<code>mempool.rs::retrieve</code> 增加 <code>height</code>/<code>prev_hash</code> 参数，<code>unconfirmed_pool.rs</code> 的 <code>TemplateFilter</code> 复检后把高度过期交易连同后代移出池，出块模板内容与池内交易存留随之改变。</li>
+<li>兼容性（#8265）：peer mempool RPC 的 <code>get_state</code>（method id 2）被移除，调用方收到 <code>UnsupportedMethod</code>，方法号保留不再复用（发行说明称该方法未被使用）。</li>
+<li>兼容性（#8322）：<code>comms/dht/src/rpc/service.rs</code> 的 <code>get_peers</code> 固定 <code>features = Some(COMMUNICATION_NODE)</code>，<code>include_clients</code> 自 v6.3.0 起被忽略、客户端节点不再返回，依赖该 RPC 枚举客户端的工具失效。</li>
+<li>兼容性/启动（#8225、#8322）：<code>comms/dht/src/config.rs</code> 对 <code>flood_ban_max_msg_count</code>、<code>flood_ban_timespan</code> 新增范围硬校验，越界配置使节点启动加载失败，<code>common/src/configuration/name_server.rs</code> 把 <code>system/&lt;后缀&gt;</code> 由可解析改为报错。</li>
+<li>稳定性/传播（#8322、#8266）：<code>outbound/broadcast.rs</code> 新增 <code>ForwardBudget</code> 按来源与目标限额截断转发，超额消息直接丢弃，<code>connectivity/metrics.rs</code> 重写洪水计数（转发流量按 10 倍限额计），高负载下交易/区块转发会被削减，代码注释自述诚实中继仍可能被邻居封禁。</li>
+</ol>
+<p><strong>待核实的发行说明主张</strong></p>
+<ol start="15">
+<li>#8257 “derive the pruning target from validated headers”：当前差异未见剪枝目标计算实现，代码影响待核实。</li>
+<li>#8258 “only disable block acceptance after a peer has proven a stronger chain”：未见块接受禁用逻辑的实现差异，影响待核实。</li>
+<li>#8204 “do not record out-of-sequence headers as bad blocks” 与 #8329 “refresh cached chain metadata after a rewind”：header-sync 相关实现未在各段匹配到证据，错误 bad block 记录与元数据刷新的影响待核实。</li>
+<li>#8201 “horizon sync resume and peer handling improvements”：仅见 <code>horizon_state_sync/synchronizer.rs</code> 的 MMR 位置校验，断点续传与 peer 处理的实现未匹配到证据。</li>
+</ol>
+<h5>版本信息</h5>
+<p>发布于 2026-11-10T11:57:54Z · 比较 <code>v6.3.0-pre.2</code> → <code>v6.3.0-pre.4</code> · <a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.4">打开 Release</a></p>
+<hr>
+<p>审查范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整审查”标识为准。</p>
+</article></main></body></html>
