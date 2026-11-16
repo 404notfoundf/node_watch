@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>上游 Release 监控报告 · 2026-11-16 05:46:26 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>上游 Release 监控报告</h1>
+<h2>检查批次 2026-11-16 05:46:26 UTC</h2>
+<h3>tari</h3>
+<h4>v6.3.0-pre.2</h4>
+<ul>
+<li>仓库：<a href="https://github.com/tari-project/tari"><code>tari-project/tari</code></a></li>
+<li>发布日期：2026-10-29T01:28:17Z</li>
+<li>Release：<a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.2">打开发布页</a></li>
+<li>代码比较：<code>v6.3.0-pre.1</code> → <code>v6.3.0-pre.2</code></li>
+<li>审查模式：快速预检</li>
+<li>审查结论：<strong>重点关注</strong></li>
+<li><strong>升级建议：</strong> 需人工确认</li>
+<li><strong>建议理由：</strong> 发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。</li>
+<li><strong>重点标记：</strong> ⚠️ <strong>重大发行说明待核实：</strong> 共识/硬分叉声明、兼容性声明、安全声明、稳定性/数据声明</li>
+<li><strong>标记依据：</strong> <strong>硬分叉/共识：</strong> 共识变更：发行说明称 “check claimed difficulty on short header batches” 与 “require a sorted body before treating it as the one its header commits to”，可能涉及验证规则但 diff 未确认，发行说明未声明硬分叉 · <strong>兼容性：</strong> 发行说明称 “replace per-request Argon2id with constant-time Basic auth and per-IP backoff”，diff 未确认认证协议变更对现有客户端的影响 · <strong>安全：</strong> 发行说明称 “zeroize UnblindedOutput keys on all exit paths and redact Debug”，diff 未确认密钥清理实现 · <strong>稳定性/数据：</strong> 发行说明称 “bundle Tor 0.4.9.15 so the base node no longer exits on the current Tor consensus”，diff 未确认节点退出问题的修复</li>
+</ul>
+<h5>AI 审查</h5>
+<ol>
+<li>
+<p>（待验证，共识/验证规则）发行说明 PR #8160 “check claimed difficulty on short header batches” 与 PR #8193 “require a sorted body before treating it as the one its header commits to” 涉及 <code>header_sync/synchronizer.rs</code>、<code>validation/block_body/*</code> 等验证路径，可能改变区块/头验证判定，但本次未提供代码差异，无法核实。发行说明未声明硬分叉。</p>
+</li>
+<li>
+<p>（待验证，兼容性/安全）PR #8170 称 gRPC 认证 “replace per-request Argon2id with constant-time Basic auth and per-IP backoff”，涉及 <code>applications/minotari_app_grpc/src/authentication/basic_auth.rs</code> 与 <code>server_interceptor.rs</code>（后者 +423/-38）。认证交互若改变会影响连接 gRPC 的客户端/矿工软件，但无 diff 证据确认具体协议变化。</p>
+</li>
+<li>
+<p>（待验证，节点网络行为）PR #8173 “drop encrypted transaction gossip and always ban the clear-text source” 及 PR #8187 “only exempt height-dependent input script failures from bans” 改变交易转发与封禁行为，涉及 <code>mempool/service/inbound_handlers.rs</code>、<code>mempool_storage.rs</code>，未提供代码无法确认对 P2P 网络兼容性的影响。</p>
+</li>
+<li>
+<p>（待验证，数据一致性/稳定性）PR #8174/#8175 称修复孤儿祖先遍历与 “output index consistency”，涉及 <code>chain_storage/blockchain_database.rs</code>、<code>lmdb_db/lmdb_db.rs</code>、<code>utxo_mined_info.rs</code>，发行说明声明涉及链存储一致性但 diff 未确认，无法核实是否影响已有数据库数据。PR #8194 称打包 Tor 0.4.9.15 以修复 base node 退出，同样未经代码核实。</p>
+</li>
+<li>
+<p>（待验证，安全/数据）PR #8164 称 “back up corrupt identity files before regenerating”（<code>identity_management.rs</code> +517/-44）与 PR #8166 称 “zeroize UnblindedOutput keys on all exit paths”，均为安全/密钥材料处理相关声明，当前材料无代码片段可核实。</p>
+</li>
+</ol>
+<p>补充说明：本次为 FAST PRECHECK，未提供完整 diff 与可疑片段，以上均为发行说明声明但未能用代码证实的事项，不代表已证明相关代码不存在问题。</p>
+<h4>v6.3.0-pre.4</h4>
+<ul>
+<li>仓库：<a href="https://github.com/tari-project/tari"><code>tari-project/tari</code></a></li>
+<li>发布日期：2026-11-10T11:57:54Z</li>
+<li>Release：<a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.4">打开发布页</a></li>
+<li>代码比较：<code>v6.3.0-pre.2</code> → <code>v6.3.0-pre.4</code></li>
+<li>审查模式：快速预检</li>
+<li>审查结论：<strong>重点关注</strong></li>
+<li><strong>升级建议：</strong> 需人工确认</li>
+<li><strong>建议理由：</strong> 发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。</li>
+<li><strong>重点标记：</strong> ⚠️ <strong>重大发行说明待核实：</strong> 共识/硬分叉声明、兼容性声明、内存相关声明、安全声明、稳定性/数据声明</li>
+<li><strong>标记依据：</strong> <strong>硬分叉/共识：</strong> 共识变更：发行说明声明 &quot;reject headers whose kernel MMR size does not grow&quot;、&quot;check chain-linked timelocks at the height the body is mined at&quot;、&quot;tighten kernel burn commitment checks&quot; 等验证规则变化，属共识变更声明，发行说明未声明硬分叉，当前未提供差异无法核实 · <strong>兼容性：</strong> 待验证：发行说明声明 &quot;remove the unused get_state method from the peer mempool RPC&quot;，涉及 RPC 接口删除，变更文件含 mempool/proto/state_response.proto，但未提供代码差异无法核实 · <strong>内存问题：</strong> 待验证：发行说明声明 &quot;bound the RandomX keys gossip can select&quot; 与 &quot;bound Join gossip and OnConnect peer sync admission&quot;，属内存/资源上限类改动，但未提供代码差异无法核实 · <strong>安全：</strong> 待验证：发行说明声明 &quot;update libz-sys to 1.1.31 to mitigate RUSTSEC-2026-0418&quot; 与 &quot;validate leaf position and bounds in MerkleProof::verify&quot;，但未提供代码差异无法核实 · <strong>稳定性/数据：</strong> 待验证：发行说明声明 &quot;make a rewind past the pruning horizon an atomic reset to genesis&quot; 与 &quot;stop the consistency check reporting healthy databases as corrupt&quot;，涉及链数据处理，但未提供代码差异无法核实</li>
+</ul>
+<h5>AI 审查</h5>
+<p>说明：本次为 FAST PRECHECK，未提供代码差异（suspicious_diff_hunks 为空），以下均为发行说明声明但未经代码核实的事项。</p>
+<ol>
+<li>
+<p>共识验证规则变更声明：发行说明列出 &quot;reject headers whose kernel MMR size does not grow&quot;（#8262）、&quot;check chain-linked timelocks at the height the body is mined at&quot;（#8319）、&quot;tighten kernel burn commitment checks&quot;（#8323）及 &quot;keep median timestamp windows in height order&quot;（#8195）。这些属于共识变更声明，发行说明未声明硬分叉；对应 header_full_validator.rs、aggregate_body_chain_validator.rs、aggregate_body_internal_validator.rs 等文件有大幅改动，但缺少差异无法确认实现细节与兼容影响。</p>
+</li>
+<li>
+<p>链存储回滚与重置语义（数据完整性）：发行说明声明 &quot;make a rewind past the pruning horizon an atomic reset to genesis&quot;（#8260）与 &quot;only reset a pruned node for a chain stronger than everything it holds&quot;（#8263），涉及 pruning 节点可能被重置到 genesis 的行为，需节点运营者关注；当前未提供 blockchain_database.rs 等文件的具体改动，无法核实条件与安全性。</p>
+</li>
+<li>
+<p>兼容性：发行说明声明 &quot;remove the unused get_state method from the peer mempool RPC&quot;（#8265），删除 RPC 方法属协议接口变更，可能影响依赖该接口的外部工具；mempool/proto/state_response.proto（-16）等文件有删除，但未提供差异无法核实兼容范围。</p>
+</li>
+<li>
+<p>内存/资源限制：发行说明声明 &quot;bound the RandomX keys gossip can select&quot;（#8246）与 &quot;bound Join gossip and OnConnect peer sync admission&quot;（#8266），属资源上限类加固，相关 join_gate.rs、admission.rs、network_discovery/* 文件有新增；未提供差异无法确认是否存在残留的无界增长风险。</p>
+</li>
+<li>
+<p>安全相关：发行说明声明升级 libz-sys 至 1.1.31 以缓解 RUSTSEC-2026-0418（#8255），以及在 MerkleProof::verify 中校验叶子位置与边界（#8294，merkle_proof.rs +6/-0）；均为安全声明但无差异可核实修复完整性。</p>
+</li>
+<li>
+<p>稳定性：发行说明声明 &quot;stop the consistency check reporting healthy databases as corrupt&quot;（#8245）、&quot;do not record out-of-sequence headers as bad blocks&quot;（#8204）和 &quot;refresh cached chain metadata after a rewind&quot;（#8329），涉及数据库校验与同步/封禁行为；未提供差异无法确认具体触发条件与修复效果。</p>
+</li>
+</ol>
+</article></main></body></html>
