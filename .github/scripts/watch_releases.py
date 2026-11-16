@@ -29,9 +29,12 @@ REPORT_TEMPLATE = Path(__file__).with_name("upstream_release_report.md")
 DIFF_CHUNK_CHARS = 120_000
 REVIEW_MODES = {"auto", "fast", "full"}
 FULL_REVIEW_NOTE_RE = re.compile(
-    r"hard[ -]?fork|硬分叉|共识|consensus|breaking[ -]?change|破坏性变更|"
-    r"security|漏洞|vulnerab|CVE|memory[ -]?(?:leak|exhaustion)|内存泄漏|OOM|"
-    r"data[ -]?loss|数据丢失|migration|迁移",
+    r"hard[ -]?fork|硬分叉|activation[ -]?(?:height|block)|激活(?:高度|区块)|"
+    r"(?:consensus|共识).*(?:rule|change|incompatib|规则|变更|不兼容)|"
+    r"(?:rule|规则).*(?:consensus|共识)|breaking[ -]?change|破坏性变更|"
+    r"CVE-\d{4}-\d+|remote[ -]?code[ -]?execution|\bRCE\b|远程代码执行|权限绕过|认证绕过|提权|"
+    r"memory[ -]?(?:leak|exhaustion)|内存泄漏|\bOOM\b|out[ -]?of[ -]?memory|"
+    r"data[ -]?(?:loss|corruption)|数据(?:丢失|损坏)|irreversible[ -]?migration|不可逆迁移",
     re.IGNORECASE,
 )
 SUSPICIOUS_DIFF_RE = re.compile(
@@ -119,19 +122,26 @@ def configured_review_mode(config: dict) -> str:
     return mode
 
 
+def configured_max_releases_per_run(config: dict) -> int:
+    limit = config.get("review", {}).get("max_releases_per_run", 3)
+    if type(limit) is not int or limit < 1:
+        raise ValueError("review.max_releases_per_run must be a positive integer")
+    return limit
+
+
 def configured_repositories(config: dict):
     for coin, item in config.get("coins", {}).items():
         if not isinstance(item, dict):
             raise ValueError(f"coins.{coin} must be a mapping")
-        repo, from_release = item.get("repo", ""), item.get("from_release", "")
+        repo, running_version = item.get("repo", ""), item.get("running_version", "")
         if not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
             raise ValueError(f"Invalid repo for {coin}: {repo!r}")
-        if not isinstance(from_release, str) or not from_release.strip():
-            raise ValueError(f"from_release is required for {repo}")
+        if not isinstance(running_version, str) or not running_version.strip():
+            raise ValueError(f"running_version is required for {repo}")
         override = item.get("ai", {})
         if not isinstance(override, dict):
             raise ValueError(f"ai override for {repo} must be a mapping")
-        yield str(coin), repo, from_release, override
+        yield str(coin), repo, running_version, override
 
 
 def github_json(path: str):
@@ -145,7 +155,7 @@ def github_json(path: str):
         return json.loads(response.read().decode("utf-8"))
 
 
-def release_window_from_start(repo: str, start_tag: str) -> tuple[list[dict], str | None]:
+def release_window_after_running_version(repo: str, running_version: str) -> tuple[list[dict], str]:
     releases, page = [], 1
     while True:
         batch = github_json(f"repos/{repo}/releases?per_page=100&page={page}")
@@ -153,15 +163,10 @@ def release_window_from_start(repo: str, start_tag: str) -> tuple[list[dict], st
             break
         releases.extend(item for item in batch if not item.get("draft"))
         page += 1
-    index = next((i for i, item in enumerate(releases) if item.get("tag_name") == start_tag), None)
+    index = next((i for i, item in enumerate(releases) if item.get("tag_name") == running_version), None)
     if index is None:
-        raise ValueError(f"{repo}: from_release {start_tag!r} is not a published GitHub Release")
-    previous_tag = releases[index + 1]["tag_name"] if index + 1 < len(releases) else None
-    return list(reversed(releases[: index + 1])), previous_tag
-
-
-def releases_from_start(repo: str, start_tag: str) -> list[dict]:
-    return release_window_from_start(repo, start_tag)[0]
+        raise ValueError(f"{repo}: running_version {running_version!r} is not a published GitHub Release")
+    return list(reversed(releases[:index])), running_version
 
 
 def release_diff(repo: str, previous_tag: str | None, tag: str) -> str:
@@ -382,6 +387,35 @@ def risk_from(analysis: str) -> str:
     return found.group(1) if found else "未标注"
 
 
+def highlight_statuses(analysis: str) -> dict[str, str]:
+    line = re.search(r"(?m)^重点标记[：:]\s*(.*)$", analysis)
+    if not line:
+        return {}
+    return dict(re.findall(
+        r"(破坏性变更|硬分叉/共识|兼容性|内存问题|安全|稳定性/数据)\s*=\s*(无|已确认|待验证|修复|风险)",
+        line.group(1),
+    ))
+
+
+def upgrade_advice(analysis: str) -> tuple[str, str]:
+    """Return a deterministic operator recommendation from AI evidence."""
+    risk = risk_from(analysis)
+    statuses = highlight_statuses(analysis)
+    if risk == "P0":
+        return "必须升级", "风险级别为 P0，需要立即处理。"
+    if statuses.get("硬分叉/共识") == "已确认":
+        return "必须升级", "已确认硬分叉或重大共识变更，旧节点可能无法与网络保持兼容。"
+    if statuses.get("破坏性变更") == "已确认" or statuses.get("兼容性") == "已确认":
+        return "必须升级", "已确认破坏性或兼容性变更，需要升级并核对现有配置。"
+    if statuses.get("安全") == "风险":
+        return "必须升级", "发现已确认安全风险，应尽快升级。"
+    if "待验证" in statuses.values() or risk in {"待人工复核", "未标注"}:
+        return "需人工确认", "发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。"
+    if risk in {"P1", "P2"} or any(statuses.get(name) in {"修复", "风险"} for name in ("内存问题", "安全", "稳定性/数据")):
+        return "建议升级", "包含已确认的重要修复或风险，建议在维护窗口升级。"
+    return "可暂缓", "未发现需要立即处理的重大变更。"
+
+
 def highlight_summary(analysis: str) -> str:
     line = re.search(r"(?m)^重点标记[：:]\s*(.*)$", analysis)
     if not line:
@@ -493,6 +527,7 @@ def format_release(
     highlights = highlight_summary(analysis)
     highlight_reasons = highlight_reason_summary(analysis)
     risk = risk_from(analysis)
+    advice, advice_reason = upgrade_advice(analysis)
     meta = {
         "coin": coin,
         "repo": repo,
@@ -501,6 +536,8 @@ def format_release(
         "risk": risk,
         "importance": importance(risk, highlights),
         "conclusion": conclusion(risk, highlights),
+        "upgrade_advice": advice,
+        "upgrade_reason": advice_reason,
         "review": "快速预检" if review == "fast" else "完整审查",
         "highlights": highlights,
         "highlight_reasons": highlight_reasons,
@@ -515,6 +552,8 @@ def format_release(
         "risk": meta["risk"],
         "importance": meta["importance"],
         "conclusion": meta["conclusion"],
+        "upgrade_advice": meta["upgrade_advice"],
+        "upgrade_reason": meta["upgrade_reason"],
         "review": meta["review"],
         "highlights": highlights,
         "highlight_reasons": highlight_reasons,
@@ -680,7 +719,7 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
             suffix = f" · {highlights}" if highlights != "无" else ""
             lines.append(
                 f"- **{coin}** `{meta['tag']}` · {meta.get('review', '完整审查')} "
-                f"· {meta.get('conclusion', '待人工复核')}{suffix}"
+                f"· {meta.get('conclusion', '待人工复核')} · {meta.get('upgrade_advice', '需人工确认')}{suffix}"
             )
             if points := issue_key_points(meta):
                 lines.append(f"  - 要点：{points}")
@@ -724,23 +763,28 @@ def main() -> None:
     config = load_config()
     watched = list(configured_repositories(config))
     default_review_mode = configured_review_mode(config)
+    max_releases_per_run = configured_max_releases_per_run(config)
     REPORTS.mkdir(parents=True, exist_ok=True)
     if not watched:
         set_workflow_output("failure_count", "0")
         print("No repositories configured in config/watch.yaml.")
         return
     failures = []
+    reviewed = 0
     issue_history = github_issue_history() if should_read_github_issue_history() else None
     processed = reported_releases(issue_history)
     new_entries: dict[str, dict[str, list[tuple[dict, str]]]] = {}
-    for coin, repo, from_release, override in watched:
+    for coin, repo, running_version, override in watched:
         try:
-            releases, previous = release_window_from_start(repo, from_release)
+            releases, previous = release_window_after_running_version(repo, running_version)
             for release in releases:
                 key = (coin, repo, release["tag_name"])
                 if key in processed:
                     previous = release["tag_name"]
                     continue
+                if reviewed >= max_releases_per_run:
+                    break
+                reviewed += 1
                 try:
                     diff = release_diff(repo, previous, release["tag_name"])
                     selected_review = review_mode(default_review_mode, release, diff)
@@ -756,6 +800,8 @@ def main() -> None:
                 previous = release["tag_name"]
         except Exception as error:
             failures.append(f"{repo}: {error}")
+        if reviewed >= max_releases_per_run:
+            break
     for failure in failures:
         print(f"Check pending: {failure}", flush=True)
     set_workflow_output("failure_count", str(len(failures)))

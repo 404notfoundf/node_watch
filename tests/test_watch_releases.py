@@ -46,7 +46,7 @@ class WatchReleaseTests(unittest.TestCase):
         path = watch.report_path("coin/../x", "owner/repo", "v1/../2")
         self.assertEqual(path, watch.REPORTS / "coin%2F..%2Fx" / "owner--repo" / "v1%2F..%2F2.md")
 
-    def test_release_order_starts_at_configured_release(self):
+    def test_release_order_starts_after_running_version(self):
         original = watch.github_json
         pages = [
             [{"tag_name": "v3"}, {"tag_name": "v2"}],
@@ -55,7 +55,9 @@ class WatchReleaseTests(unittest.TestCase):
         ]
         watch.github_json = lambda _: pages.pop(0)
         try:
-            self.assertEqual([item["tag_name"] for item in watch.releases_from_start("o/r", "v2")], ["v2", "v3"])
+            releases, previous = watch.release_window_after_running_version("o/r", "v2")
+            self.assertEqual([item["tag_name"] for item in releases], ["v3"])
+            self.assertEqual(previous, "v2")
         finally:
             watch.github_json = original
 
@@ -172,8 +174,45 @@ class WatchReleaseTests(unittest.TestCase):
         routine_diff = "diff --git a/docs/readme.md b/docs/readme.md\n+++ b/docs/readme.md\n+Update docs\n"
         self.assertEqual(watch.review_mode("auto", {"body": "Routine release"}, routine_diff), "fast")
         self.assertEqual(watch.review_mode("auto", {"body": "Hard fork activation"}, routine_diff), "full")
+        self.assertEqual(watch.review_mode("auto", {"body": "Security improvements and memory optimization"}, routine_diff), "fast")
+        self.assertEqual(watch.review_mode("auto", {"body": "Fix CVE-2026-1234"}, routine_diff), "full")
         suspicious_diff = "diff --git a/src/a.py b/src/a.py\n+++ b/src/a.py\n+subprocess.run(command)\n"
         self.assertEqual(watch.review_mode("auto", {"body": "Routine release"}, suspicious_diff), "full")
+
+    def test_review_limit_must_be_positive_and_defaults_to_three(self):
+        self.assertEqual(watch.configured_max_releases_per_run({}), 3)
+        self.assertEqual(watch.configured_max_releases_per_run({"review": {"max_releases_per_run": 2}}), 2)
+        with self.assertRaisesRegex(ValueError, "max_releases_per_run"):
+            watch.configured_max_releases_per_run({"review": {"max_releases_per_run": 0}})
+
+    def test_release_limit_defers_remaining_versions_to_the_next_run(self):
+        original_reports = watch.REPORTS
+        original_root = watch.ROOT
+        with tempfile.TemporaryDirectory() as temp_dir:
+            watch.ROOT = Path(temp_dir)
+            watch.REPORTS = watch.ROOT / "reports"
+            diff_calls = []
+            analysis = (
+                "风险级别：P3\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+                "内存问题=无；安全=无；稳定性/数据=无\n"
+                "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+                "内存问题=无；安全=无；稳定性/数据=无"
+            )
+            try:
+                with patch.dict(os.environ, {"GITHUB_ACTIONS": "", "GITHUB_OUTPUT": ""}), \
+                        patch.object(watch, "load_config", return_value={
+                            "review": {"max_releases_per_run": 2},
+                            "coins": {"tari": {"repo": "tari-project/tari", "running_version": "v2"}},
+                        }), patch.object(watch, "should_read_github_issue_history", return_value=False), \
+                        patch.object(watch, "release_window_after_running_version", return_value=(
+                            [{"tag_name": "v3"}, {"tag_name": "v4"}, {"tag_name": "v5"}], "v2",
+                        )), patch.object(watch, "release_diff", side_effect=lambda repo, previous, tag: diff_calls.append((previous, tag)) or "diff"), \
+                        patch.object(watch, "ask_ai", return_value=analysis), patch("builtins.print"):
+                    watch.main()
+                self.assertEqual(diff_calls, [("v2", "v3"), ("v3", "v4")])
+            finally:
+                watch.REPORTS = original_reports
+                watch.ROOT = original_root
 
     def test_fast_review_sends_inventory_and_suspicious_hunks_not_full_diff(self):
         diff = (
@@ -261,6 +300,40 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(meta["conclusion"], "不重要")
         self.assertIn("- 审查结论：**不重要**", report)
 
+    def test_upgrade_advice_is_reported_for_every_release(self):
+        def analysis(risk, highlights):
+            return (
+                f"风险级别：{risk}\n重点标记：{highlights}\n"
+                "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
+                "内存问题=无；安全=无；稳定性/数据=无"
+            )
+
+        required, _ = watch.upgrade_advice(analysis(
+            "P2", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+        ))
+        manual, _ = watch.upgrade_advice(analysis(
+            "P3", "破坏性变更=待验证；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+        ))
+        suggested, _ = watch.upgrade_advice(analysis(
+            "P3", "破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=修复；安全=无；稳定性/数据=无",
+        ))
+        deferred, _ = watch.upgrade_advice(analysis(
+            "P3", "破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+        ))
+
+        self.assertEqual(required, "必须升级")
+        self.assertEqual(manual, "需人工确认")
+        self.assertEqual(suggested, "建议升级")
+        self.assertEqual(deferred, "可暂缓")
+
+        meta, report = watch.format_release(
+            "coin", "owner/repo", {"tag_name": "v2"}, "v1", analysis(
+                "P2", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+            ),
+        )
+        self.assertEqual(meta["upgrade_advice"], "必须升级")
+        self.assertIn("- **升级建议：** 必须升级", report)
+
     def test_issue_summary_lists_all_coins_releases_and_deduplicates(self):
         def entry(coin, repo, tag):
             analysis = (
@@ -297,6 +370,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertLess(body.index("**coin-b**"), body.index("**tari**"))
         self.assertIn("内存问题修复", body)
         self.assertIn("完整审查", body)
+        self.assertIn("建议升级", body)
         self.assertIn("要点：内存问题：src/cache.rs 修复缓存未释放", body)
         self.assertNotIn("标记依据", body)
         self.assertNotIn("1. Finding", body)
@@ -408,9 +482,9 @@ class WatchReleaseTests(unittest.TestCase):
                     "GITHUB_REPOSITORY": "",
                     "GITHUB_OUTPUT": "",
                 }), patch.object(watch, "load_config", return_value={
-                    "coins": {"tari": {"repo": "tari-project/tari", "from_release": "v6.4.0"}},
-                }), patch.object(watch, "release_window_from_start", return_value=(
-                    [{"tag_name": "v6.4.0"}, {"tag_name": "v6.5.0"}, {"tag_name": "v6.6.0"}], "v6.3.0",
+                    "coins": {"tari": {"repo": "tari-project/tari", "running_version": "v6.4.0"}},
+                }), patch.object(watch, "release_window_after_running_version", return_value=(
+                    [{"tag_name": "v6.5.0"}, {"tag_name": "v6.6.0"}], "v6.4.0",
                 )), patch.object(watch, "run", side_effect=run), \
                         patch.object(watch, "github_json", return_value=issues), \
                         patch.object(watch, "release_diff", side_effect=release_diff), \
@@ -493,9 +567,9 @@ class WatchReleaseTests(unittest.TestCase):
             try:
                 with patch.dict(os.environ, {"GITHUB_ACTIONS": "", "GITHUB_OUTPUT": ""}), \
                         patch.object(watch, "load_config", return_value={
-                            "coins": {"tari": {"repo": "tari-project/tari", "from_release": "v2"}},
+                            "coins": {"tari": {"repo": "tari-project/tari", "running_version": "v2"}},
                         }), \
-                        patch.object(watch, "release_window_from_start", return_value=([{"tag_name": "v2"}], "v1")), \
+                        patch.object(watch, "release_window_after_running_version", return_value=([{"tag_name": "v3"}], "v2")), \
                         patch.object(watch, "release_diff", return_value="diff"), \
                         patch.object(watch, "ask_ai", side_effect=watch.AIReviewError("HTTP 503")), \
                         patch("builtins.print"):
@@ -510,9 +584,9 @@ class WatchReleaseTests(unittest.TestCase):
                     "GITHUB_OUTPUT": str(output),
                 }), \
                         patch.object(watch, "load_config", return_value={
-                            "coins": {"tari": {"repo": "tari-project/tari", "from_release": "v2"}},
+                            "coins": {"tari": {"repo": "tari-project/tari", "running_version": "v2"}},
                         }), \
-                        patch.object(watch, "release_window_from_start", return_value=([{"tag_name": "v2"}], "v1")), \
+                        patch.object(watch, "release_window_after_running_version", return_value=([{"tag_name": "v3"}], "v2")), \
                         patch.object(watch, "release_diff", return_value="diff"), \
                         patch.object(watch, "github_json", return_value=[]), \
                         patch.object(watch, "ask_ai", side_effect=watch.AIReviewError("HTTP 503")), \

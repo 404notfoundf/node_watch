@@ -6,6 +6,8 @@
 - 代码比较：`{{comparison_start}}` → `{{tag}}`
 - 审查模式：{{review}}
 - 审查结论：**{{conclusion}}**
+- **升级建议：** {{upgrade_advice}}
+- **建议理由：** {{upgrade_reason}}
 - **重点标记：** {{highlights}}
 - **标记依据：** {{highlight_reasons}}
 
