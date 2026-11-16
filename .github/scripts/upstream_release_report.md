@@ -2,6 +2,7 @@
 
 - 仓库：[`{{repo}}`](https://github.com/{{repo}})
 - 发布日期：{{published_at}}
+- 版本类型：{{release_channel}}
 - Release：[打开发布页]({{release_url}})
 - 代码比较：`{{comparison_start}}` → `{{tag}}`
 - 审查模式：{{review}}

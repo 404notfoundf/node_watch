@@ -14,8 +14,8 @@ ai:
     每项发现控制在一两句话；没有重大事项时写：
     “未发现需要单独报告的重大变更。”
 
-# auto 同时用于 GitHub Actions 和本地 Codex CLI。
-# fast 只发送 Release note、文件清单和可疑片段；full 审查完整代码差异。
+# auto 同时用于 GitHub Actions 和本地 Codex CLI：所有版本均按风险信号选择审查模式。
+# fast 强制快速预检；full 强制审查完整代码差异。
 review:
   mode: auto
   max_releases_per_run: 3 # 每轮最多审查的新 Release 数；剩余版本在下一轮继续。

@@ -220,12 +220,13 @@ class WatchReleaseTests(unittest.TestCase):
             "+subprocess.run(command)\n context\n"
             "diff --git a/docs/readme.md b/docs/readme.md\n+++ b/docs/readme.md\n+ordinary documentation\n"
         )
-        material = watch.fast_review_material("owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", diff)
+        material = watch.fast_review_material("owner/repo", {"tag_name": "v1", "body": "notes", "prerelease": True}, "v0", diff)
         self.assertIn("src/worker.py (+1/-0, 普通路径)", material)
         self.assertIn("docs/readme.md (+1/-0, 普通路径)", material)
         self.assertIn("subprocess.run(command)", material)
         self.assertNotIn("ordinary documentation", material)
         self.assertIn("FAST PRECHECK", material)
+        self.assertIn("Release channel: 预发布版", material)
 
     def test_fast_ask_ai_makes_one_request(self):
         captured = []
@@ -334,6 +335,29 @@ class WatchReleaseTests(unittest.TestCase):
         )
         self.assertEqual(meta["upgrade_advice"], "必须升级")
         self.assertIn("- **升级建议：** 必须升级", report)
+
+    def test_prerelease_is_labeled_and_not_recommended_for_production(self):
+        analysis = (
+            "风险级别：P2\n"
+            "重点标记：破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n"
+            "重点标记依据：破坏性变更=无；硬分叉/共识=共识变更：src/consensus.rs 修改了区块验证规则；"
+            "兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n1. 共识规则已变更。"
+        )
+        prerelease = {"tag_name": "v2-pre.1", "prerelease": True}
+        meta, report = watch.format_release("coin", "owner/repo", prerelease, "v1", analysis)
+        stable, _ = watch.format_release("coin", "owner/repo", {"tag_name": "v2", "prerelease": False}, "v1", analysis)
+        issue = watch.issue_body({"coin": {"owner/repo": [(meta, report)]}})
+
+        self.assertEqual(watch.release_channel(prerelease), "预发布版")
+        self.assertEqual(watch.release_channel({"tag_name": "v2-rc.1"}), "预发布版")
+        self.assertEqual(stable["release_channel"], "正式版")
+        self.assertEqual(meta["upgrade_advice"], "预发布版重大事项")
+        self.assertEqual(stable["upgrade_advice"], "必须升级")
+        self.assertIn("版本类型：预发布版", report)
+        self.assertIn("不建议直接用于生产升级", report)
+        self.assertIn("`v2-pre.1` · 预发布版", issue)
+        self.assertIn("不建议直接将 `v2-pre.1` 用作生产升级版本", issue)
+        self.assertNotIn("测试网", report + issue)
 
     def test_issue_summary_lists_all_coins_releases_and_deduplicates(self):
         def entry(coin, repo, tag):
