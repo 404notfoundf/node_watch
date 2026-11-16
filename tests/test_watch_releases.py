@@ -273,6 +273,9 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("one or two concise sentences", watch.SYSTEM_PROMPT)
         self.assertIn("minor fixes or optimizations", watch.SYSTEM_PROMPT)
         self.assertIn("发行说明未声明硬分叉", watch.SYSTEM_PROMPT)
+        self.assertIn("代码已确认的发现", watch.SYSTEM_PROMPT)
+        self.assertIn("待核实的发行说明主张", watch.SYSTEM_PROMPT)
+        self.assertIn("Do not repeat the release tag as a heading", watch.SYSTEM_PROMPT)
         hard_fork = analysis.replace(
             "硬分叉/共识=src/consensus.rs 修改了区块验证规则",
             "硬分叉/共识=硬分叉：激活高度 123 会使旧节点拒绝新区块",
@@ -280,11 +283,13 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("硬分叉**（已确认）", watch.highlight_summary(hard_fork))
         _, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v1"}, "v0",
-            f"风险级别：P1\n{analysis}\n1. Note contains {{{{repo}}}}.",
+            f"风险级别：P1\n{analysis}\n### v1\n1. Note contains {{{{repo}}}}.",
         )
         self.assertIn(f"- **重点标记：** {summary}", report)
-        self.assertIn(f"- **标记依据：** {reasons}", report)
-        self.assertIn("- 审查模式：完整审查", report)
+        self.assertIn("#### v1 · 正式版 · 完整审查", report)
+        self.assertIn("<!-- watch-repo: owner/repo -->", report)
+        self.assertNotIn("### v1", report)
+        self.assertNotIn(f"- **标记依据：** {reasons}", report)
         self.assertNotIn("重点标记依据：", report)
         self.assertNotIn("省略", report)
         self.assertIn("1. Note contains {{repo}}.", report)
@@ -300,7 +305,7 @@ class WatchReleaseTests(unittest.TestCase):
         )
         self.assertEqual(meta["importance"], "不重要")
         self.assertEqual(meta["conclusion"], "不重要")
-        self.assertIn("- 审查结论：**不重要**", report)
+        self.assertIn("- **处置建议：** 可暂缓 · 不重要", report)
 
     def test_upgrade_advice_is_reported_for_every_release(self):
         def analysis(risk, highlights):
@@ -334,7 +339,7 @@ class WatchReleaseTests(unittest.TestCase):
             ),
         )
         self.assertEqual(meta["upgrade_advice"], "必须升级")
-        self.assertIn("- **升级建议：** 必须升级", report)
+        self.assertIn("- **处置建议：** 必须升级 · 重点关注", report)
 
     def test_prerelease_is_labeled_and_not_recommended_for_production(self):
         analysis = (
@@ -353,7 +358,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(stable["release_channel"], "正式版")
         self.assertEqual(meta["upgrade_advice"], "预发布版重大事项")
         self.assertEqual(stable["upgrade_advice"], "必须升级")
-        self.assertIn("版本类型：预发布版", report)
+        self.assertIn("#### v2-pre.1 · 预发布版 · 完整审查", report)
         self.assertIn("不建议直接用于生产升级", report)
         self.assertIn("`v2-pre.1` · 预发布版", issue)
         self.assertIn("不建议直接将 `v2-pre.1` 用作生产升级版本", issue)
@@ -677,7 +682,7 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertLess(report.index("### A 币种"), report.index("### B 币种"))
                 self.assertLess(report.index("#### v1"), report.index("#### v2"))
                 self.assertNotIn("#### a/node", report)
-                self.assertEqual(report.count("- 仓库：[`a/node`]"), 2)
+                self.assertEqual(report.count("<!-- watch-repo: a/node -->"), 2)
                 self.assertNotIn("变更文件", report)
                 self.assertNotIn("Release note", report)
                 self.assertNotIn("Notes for v", report)
@@ -685,7 +690,7 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertNotIn("<!-- watch-release:", report)
                 self.assertEqual(report.count("- **重点标记：** 无"), 3)
                 self.assertEqual(report.count("1. Finding for v"), 3)
-                self.assertIn("restart at 1 for every new release", watch.SYSTEM_PROMPT)
+                self.assertIn("one continuous numbering sequence across both sections", watch.SYSTEM_PROMPT)
                 self.assertEqual(watch.reported_releases(), {
                     ("A 币种", "a/node", "v1"),
                     ("A 币种", "a/node", "v2"),

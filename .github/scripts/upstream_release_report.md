@@ -1,12 +1,9 @@
 #### {{tag}} · {{release_channel}} · {{review}}
+<!-- watch-repo: {{repo}} -->
 
 - **重点标记：** {{highlights}}
 - **处置建议：** {{upgrade_advice}} · {{conclusion}}
 - **建议理由：** {{upgrade_reason}}
-
-##### 重点标记依据
-
-{{highlight_reason_details}}
 
 ##### AI 审查
 
