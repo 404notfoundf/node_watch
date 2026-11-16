@@ -271,6 +271,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("Omit routine refactors", watch.SYSTEM_PROMPT)
         self.assertIn("one or two concise sentences", watch.SYSTEM_PROMPT)
         self.assertIn("minor fixes or optimizations", watch.SYSTEM_PROMPT)
+        self.assertIn("发行说明未声明硬分叉", watch.SYSTEM_PROMPT)
         hard_fork = analysis.replace(
             "硬分叉/共识=src/consensus.rs 修改了区块验证规则",
             "硬分叉/共识=硬分叉：激活高度 123 会使旧节点拒绝新区块",
@@ -359,19 +360,20 @@ class WatchReleaseTests(unittest.TestCase):
             title = watch.issue_title(entries)
 
         self.assertIn("3 个新版本", body)
-        self.assertIn("2 个币种、2 个仓库", body)
-        self.assertIn("## 需关注", body)
-        self.assertIn("**tari**", body)
-        self.assertIn("**coin-b**", body)
+        self.assertIn("涉及 **2 个币种：** coin-b（2 个版本）、tari（1 个版本）", body)
+        self.assertIn("## coin-b", body)
+        self.assertIn("## tari", body)
         self.assertNotIn("tari-project/tari", body)
         self.assertIn("`v6.2.0`", body)
         self.assertIn("`v1`", body)
         self.assertIn("`v2`", body)
-        self.assertLess(body.index("**coin-b**"), body.index("**tari**"))
+        self.assertLess(body.index("## coin-b"), body.index("## tari"))
         self.assertIn("内存问题修复", body)
         self.assertIn("完整审查", body)
         self.assertIn("建议升级", body)
-        self.assertIn("要点：内存问题：src/cache.rs 修复缓存未释放", body)
+        self.assertIn("下一步：** 建议在维护窗口升级到 `v1`", body)
+        self.assertIn("1. **已确认 — 内存问题修复：** src/cache.rs 修复缓存未释放", body)
+        self.assertEqual(body.count("  1. **已确认 — 内存问题修复：**"), 3)
         self.assertNotIn("标记依据", body)
         self.assertNotIn("1. Finding", body)
         self.assertIn("/actions/runs/12345", body)
@@ -380,6 +382,31 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertNotIn("reports/", body)
         self.assertIn("[在线查看完整报告]({{report_url}})", body)
         self.assertIn("[下载 Markdown 报告（保留 90 天）]({{artifact_url}})", body)
+
+    def test_issue_summary_spells_out_unverified_release_note_claim(self):
+        analysis = (
+            "风险级别：P3\n"
+            "重点标记：破坏性变更=待验证；硬分叉/共识=待验证；兼容性=无；内存问题=无；安全=待验证；稳定性/数据=无\n"
+            "重点标记依据：破坏性变更=发行说明称‘Breaking Notes：删除旧钱包格式’，但代码差异未确认；"
+            "硬分叉/共识=共识变更：发行说明称‘side-chain claimable burn 需 canonical script 验证’，"
+            "发行说明未声明硬分叉，但代码差异未确认该规则；兼容性=无；内存问题=无；"
+            "安全=发行说明称‘移除了私钥 UTXO 导出，避免泄漏 spend key’（#8102），但代码差异未确认；稳定性/数据=无"
+        )
+        meta, _ = watch.format_release("tari", "owner/repo", {"tag_name": "v2"}, "v1", analysis)
+        body = watch.issue_body({"tari": {"owner/repo": [(meta, "report")]}})
+
+        self.assertIn("## tari", body)
+        release_summary = body[body.index("### `v2`"):]
+        self.assertIn("### `v2` · 完整审查", release_summary)
+        self.assertIn("优先关注：** Breaking Notes / Breaking Changes（破坏性变更）声明待核实 · 重大共识变更声明待核实", release_summary)
+        self.assertIn("处置结论：** 需人工核实后再决定升级", release_summary)
+        self.assertIn("发行说明涉及破坏性变更、共识变更、安全等重大声明", release_summary)
+        self.assertIn("待核实 — 共识变更：** 发行说明称‘side-chain claimable burn 需 canonical script 验证’", release_summary)
+        self.assertIn("发行说明未声明硬分叉", release_summary)
+        self.assertLess(release_summary.index("优先关注："), release_summary.index("处置结论："))
+        self.assertIn("待核实 — 安全：** 发行说明称‘移除了私钥 UTXO 导出，避免泄漏 spend key’（#8102）", release_summary)
+        self.assertLess(release_summary.index("处置结论："), release_summary.index("待核实的发行说明主张："))
+        self.assertLess(release_summary.index("待核实的发行说明主张："), release_summary.index("下一步："))
 
     def test_issue_markers_are_the_persistent_release_deduplication_state(self):
         releases = [("tari", "tari-project/tari", "v6.4.0")]
