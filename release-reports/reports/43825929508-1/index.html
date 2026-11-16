@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>节点版本审查报告 · 2026-11-16 07:53:04 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>节点版本审查报告</h1>
+<h2>检查批次 2026-11-16 07:53:04 UTC</h2>
+<h3>tari</h3>
+<h4>v6.2.0</h4>
+<ul>
+<li>仓库：<a href="https://github.com/tari-project/tari"><code>tari-project/tari</code></a></li>
+<li>发布日期：2026-10-19T11:45:12Z</li>
+<li>版本类型：正式版</li>
+<li>Release：<a href="https://github.com/tari-project/tari/releases/tag/v6.2.0">打开发布页</a></li>
+<li>代码比较：<code>v6.2.0-pre.2</code> → <code>v6.2.0</code></li>
+<li>审查模式：完整审查</li>
+<li>审查结论：<strong>重点关注</strong></li>
+<li><strong>升级建议：</strong> 需人工确认</li>
+<li><strong>建议理由：</strong> 发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。</li>
+<li><strong>重点标记：</strong> ⚠️ <strong>重大发行说明待核实：</strong> 破坏性变更声明、共识/硬分叉声明、兼容性声明、内存相关声明、安全声明、稳定性/数据声明</li>
+<li><strong>标记依据：</strong> <strong>破坏性变更：</strong> 待验证：发行说明称“⚠️ Breaking Changes: This release changes on-disk database behaviour, and wallet export behaviour”，当前差异仅含版本号改动，无法确认 · <strong>硬分叉/共识：</strong> 共识变更：待验证：发行说明称“fix(validation): require the canonical script on side-chain claimable burns”，属共识变更声明，发行说明未声明硬分叉，当前差异未确认 · <strong>兼容性：</strong> 待验证：发行说明称“common_sqlite: owner-only database files, WAL set in create_pool, per-database profiles”，涉及磁盘数据库行为，当前差异未确认 · <strong>内存问题：</strong> 待验证：发行说明称“bound memory held for stalled yamux peers, RPC/sync streams and gRPC GetBlocks”，当前差异未确认 · <strong>安全：</strong> 待验证：发行说明称“remove private-key UTXO export, which leaked the spend key”，当前差异未确认 · <strong>稳定性/数据：</strong> 待验证：发行说明称“This release changes on-disk database behaviour”，涉及数据行为变更，当前差异未确认</li>
+</ul>
+<h5>AI 审查</h5>
+<p>说明：与 v6.2.0-pre.2 相比，已提供的完整差异仅包含 Cargo.toml、Cargo.lock、supply-chain/config.toml 中的版本号从 6.2.0-pre.2 改为 6.2.0，没有任何功能代码变更。因此下列发行说明条目均为相对本次差异无法核实的声明（它们应已包含在 v6.2.0-pre.2 中）。</p>
+<ol>
+<li>
+<p>发行说明“Breaking Changes”明确声明磁盘数据库行为与钱包导出行为变更（common_sqlite 所有者权限数据库文件、WAL 设置、按库配置，以及钱包移除泄露花费私钥的私钥 UTXO 导出）。本次差异未包含任何相关代码，无法核实实现、迁移路径与回滚影响，升级前需人工复核。</p>
+</li>
+<li>
+<p>发行说明含可能影响共识/验证规则的条目：“fix(validation): require the canonical script on side-chain claimable burns”与“fix(sidechain): weigh quorum certificates by signer voting power”。这属于共识变更声明，发行说明未声明硬分叉、激活高度或网络升级；当前差异无法确认这些规则变更的内容与兼容性。</p>
+</li>
+<li>
+<p>发行说明含内存与安全修复声明（如“bound memory held for stalled yamux peers, RPC/sync streams and gRPC GetBlocks”、“prevent secret key leakage from malformed identity errors”）。本次差异未提供对应代码，无法确认修复范围与有效性。</p>
+</li>
+</ol>
+<p>未在差异中发现新增的代码级缺陷或可利用问题；由于差异仅为版本号变更，上述重大事项均需在完整代码基线（v6.1.0→v6.2.0）上人工核验后再用于生产升级决策。</p>
+<h4>v6.3.0-pre.0</h4>
+<ul>
+<li>仓库：<a href="https://github.com/tari-project/tari"><code>tari-project/tari</code></a></li>
+<li>发布日期：2026-10-28T13:05:38Z</li>
+<li>版本类型：预发布版</li>
+<li>Release：<a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.0">打开发布页</a></li>
+<li>代码比较：<code>v6.2.0</code> → <code>v6.3.0-pre.0</code></li>
+<li>审查模式：完整审查</li>
+<li>审查结论：<strong>重点关注</strong></li>
+<li><strong>升级建议：</strong> 预发布版重大事项</li>
+<li><strong>建议理由：</strong> 已确认破坏性或兼容性变更，需要升级并核对现有配置。 当前为预发布版，不建议直接用于生产升级；应评估现网影响并跟进正式版。</li>
+<li><strong>重点标记：</strong> 🚨 <strong>破坏性变更</strong>（已确认） · 🚨 <strong>兼容性</strong>（已确认） · ✅ <strong>内存问题修复</strong> · 🚨 <strong>安全</strong>（风险） · 🚨 <strong>稳定性/数据</strong>（风险） · ⚠️ <strong>重大发行说明待核实：</strong> 共识/硬分叉声明</li>
+<li><strong>标记依据：</strong> <strong>破坏性变更：</strong> 已确认 base_layer/common_types/src/seeds/cipher_seed.rs 将 CipherSeed serde 改为写入加密形态，带口令写出的版本 3 种子无法导入只读版本 2 钱包 · <strong>硬分叉/共识：</strong> 共识变更：发行说明称 &quot;use the published tari_sidechain 7.0.0 and tari_jellyfish crates&quot;，diff 仅确认 base_layer/sidechain 与 infrastructure/jellyfish 被删除并改为外部 registry 依赖，未确认命令哈希与 QC 验证的共识行为等价性，发行说明未声明硬分叉 · <strong>兼容性：</strong> 已确认 comms/dht/src/proto/mod.rs 的 is_canonical 配合 inbound/deserialize.rs 丢弃非规范编码信封，旧节点与第三方 DHT 实现互操作受影响 · <strong>内存问题：</strong> 修复 applications/minotari_console_wallet/src/grpc/wallet_grpc_server.rs 的 GetAllCompletedTransactions 删除可被 limit 触发任意大预分配的 Vec::with_capacity · <strong>安全：</strong> 风险 comms/dht/src/dedup/dedup_cache.rs 的 trim_entries_at 超容时淘汰未过期条目，comms/dht/src/config.rs 注明被淘汰消息可被再次接受 · <strong>稳定性/数据：</strong> 风险 base_layer/wallet/src/transaction_service/storage/sqlite_db.rs 的 decode_rows 在部分行解码失败时静默跳过，分页按行计数会导致结果漏掉或重复交易</li>
+</ul>
+<h5>AI 审查</h5>
+<ol>
+<li>
+<p><strong>侧链/共识验证逻辑外置为 crates.io 依赖（待验证）</strong>：<code>Cargo.toml</code> 将 <code>tari_sidechain</code> 7.0.0 与 <code>tari_jellyfish</code> 改为 registry 依赖，<code>base_layer/sidechain/*</code>、<code>infrastructure/jellyfish</code> 整体删除，<code>scripts/publish_crates.sh</code> 亦移除二者发包。命令哈希、QC 签名验证、<code>jmt_hash_scheme</code> 等共识关键逻辑的新实现无法与旧实现对照，行为等价性待验证，缺少外部 crate 源码对照材料；发行说明未声明硬分叉。</p>
+</li>
+<li>
+<p><strong>共识哈希取进程全局网络</strong>：<code>base_layer/transaction_components/src/consensus/consensus_encoding/hashing.rs</code> 新增警告，<code>DomainSeparatedConsensusHasher::new</code> 的网络字节取 <code>Network::set_current</code>/环境变量/构建默认值，嵌入方未提前设置会算出错误网络的共识哈希。</p>
+</li>
+<li>
+<p><strong>CipherSeed 序列化格式破坏性变更</strong>：<code>base_layer/common_types/src/seeds/cipher_seed.rs</code> 的 serde 改为写入加密形态（口令版本 3/Argon2id、无口令版本 2/Argon2d），仅人类可读格式回读旧明文结构，带口令写出的种子无法导入只读版本 2 钱包。</p>
+</li>
+<li>
+<p><strong>钱包数据库二级密钥 2→3 迁移与明文钱包类型加密</strong>：<code>base_layer/wallet/src/storage/sqlite_db/wallet.rs</code> 的 <code>encrypt_plaintext_wallet_type</code> 加密可能含私钥的明文钱包类型并 <code>scrub_freed_pages</code> 清页，同时警告旧文件/备份私钥应视为已泄露，回滚到二级密钥版本 2 会被 AAD 校验拒绝打开。<code>wallet.rs::read_or_create_wallet_type</code> 在钱包类型行缺失且不允许初始化时返回 <code>UnexpectedResult</code> 要求删库或助记词恢复。</p>
+</li>
+<li>
+<p><strong>严格输入校验（兼容性破坏）</strong>：<code>base_layer/transaction_components/src/tari_amount.rs::parse_amount</code> 拒绝 <code>5,000,000</code> 等逗号千分位与多余空格，旧脚本/配置会解析失败；<code>base_layer/common_types/src/tari_address/*</code> 的 <code>from_bytes</code>/base58/emoji/hex/borsh/serde 拒绝非有效曲线点密钥地址，此前可解析的地址将失败。</p>
+</li>
+<li>
+<p><strong>矿池 coinbase 请求前置校验（行为破坏性）</strong>：<code>applications/minotari_node/src/grpc/base_node_grpc_server.rs::coinbase_target_addresses</code> 与 <code>base_layer/transaction_components/src/coinbase_builder.rs::validate_coinbase_request</code> 要求一次性/双地址、视图与花费密钥为有效非单位点、payment id ≤254 字节、coinbase extra ≤ 共识上限，任一失败按索引返回 <code>InvalidArgument</code>。</p>
+</li>
+<li>
+<p><strong>钱包 gRPC 状态码与不可解码行处理</strong>：<code>applications/minotari_console_wallet/src/grpc/wallet_grpc_server.rs::lookup_error</code> 将查找失败从 <code>not_found</code>/<code>unknown</code> 改为 <code>internal</code>/<code>data_loss</code>；<code>base_layer/wallet/src/transaction_service/storage/sqlite_db.rs::decode_rows</code> 在部分行解码失败时静默跳过，<code>find_completed_transactions_paginated</code> 注明分页按行计数，被跳过行会使结果变短并可能漏掉/重复交易。</p>
+</li>
+<li>
+<p><strong>DHT 信封强制规范编码</strong>：<code>comms/dht/src/proto/mod.rs::is_canonical</code> 与 <code>inbound/deserialize.rs</code> 丢弃非 prost 规范编码信封，<code>proto/envelope.proto</code> 注明给 <code>DhtHeader</code>/<code>DhtEnvelope</code>/<code>ProtoMessageSignature</code> 加字段必须提升 DHT major 版本，否则旧节点直接丢弃。</p>
+</li>
+<li>
+<p><strong>DHT 惩戒策略收窄</strong>：<code>comms/dht/src/inbound/decryption.rs::handle_message</code> 移除对 <code>BadEncryptedMessageSemantics</code>/<code>InvalidSignature</code> 的 <code>ban_peer_until</code>，注释明示防洪是唯一限流手段；<code>dht_handler/task.rs</code>、<code>discovery/service.rs</code> 与 <code>peer_validator.rs::is_ban_offence</code> 将封禁归因改为投递者，<code>PeerSignatureFromFuture</code> 不再封禁。</p>
+</li>
+<li>
+<p><strong>去重缓存淘汰可导致重放</strong>：<code>comms/dht/src/dedup/dedup_cache.rs::trim_entries_at</code> 在超 10 倍容量天花板时按 <code>last_hit_at</code> 淘汰未过期条目（未签名优先），<code>comms/dht/src/config.rs</code> 明示被淘汰消息可被再次接受，洪泛下重放防护可被绕过。</p>
+</li>
+<li>
+<p><strong>密钥校验加固（安全修复）</strong>：<code>comms/core/src/noise/crypto_resolver.rs</code> 拒绝 identity 公钥与全零共享密钥，<code>comms/dht/src/envelope.rs</code> 拒绝非曲线点 ephemeral key，<code>utxo_scanner_task.rs::not_ours_if_invalid_key</code> 跳过无效 sender offset key，<code>imported_keys.rs</code> 将导入私钥加密域绑定到公钥并迁移重写旧域行。</p>
+</li>
+<li>
+<p><strong><code>min_peer_version</code> 配置失效</strong>：<code>comms/core/src/peer_validator/config.rs</code> 将 <code>min_peer_version</code> 改为 <code>()</code> 并由 <code>warn_min_peer_version_ignored</code> 仅告警忽略，依赖该配置拒绝对低版本对等节点的运维方失去该能力，且配置文件仍能加载。</p>
+</li>
+<li>
+<p><strong>客户端可控大容量预分配修复（内存）</strong>：<code>applications/minotari_console_wallet/src/grpc/wallet_grpc_server.rs</code> 的 <code>GetAllCompletedTransactions</code> 删除 <code>Vec::with_capacity(total_requested...)</code>，修复 <code>limit</code> 触发的任意大内存预留（OOM 风险）。</p>
+</li>
+<li>
+<p><strong>钱包状态与数据完整性变更</strong>：<code>base_layer/wallet/src/output_manager_service/service.rs::select_utxos</code> 在 <code>get_public_key_at_key_id</code> 返回 <code>InvalidPublicKey</code> 时用 <code>set_outputs_to_unmined_and_invalid</code> 改写数据库状态后重选；<code>sqlite_db.rs::fetch_last_mined_transaction</code> 改为 <code>limit(10)</code> 逐行试解码，最新行损坏时会把较旧的已挖交易当作“最近挖出”返回。</p>
+</li>
+<li>
+<p><strong>钱包 FFI 语义变更</strong>：<code>base_layer/wallet_ffi/src/lib.rs</code> 与 <code>wallet.h</code> 中 <code>wallet_get_pending_inbound/outbound_transaction_by_id</code> 的 <code>max_search_limit</code> 失效改为直接查找，<code>wallet_get_cancelled_transaction_by_id</code> 未命中返回 204，<code>wallet_get_completed_transaction_by_id</code> 的 <code>ValueNotFound</code> 改为 108。</p>
+</li>
+<li>
+<p><strong>交易所状态与 coinbase 入账规则变更待验证</strong>：<code>docs</code> 交易所指南新增状态 15–17（<code>MINED_CONFIRMED_LOCKED</code>、<code>ONE_SIDED_CONFIRMED_LOCKED</code>、<code>COINBASE_CONFIRMED_LOCKED</code>）、将 <code>TRANSACTION_STATUS_COINBASE_CONFIRMED</code> 改为不可入账、确认深度由 6 改为 10，三个片段均未提供对应实现代码，缺少状态枚举与 <code>TransactionInfo</code> 字段实现材料。（<code>DATA_LOSS</code> 状态已在 <code>lookup_error</code> 中确认。）</p>
+</li>
+<li>
+<p><strong>未核实的发行说明声明</strong>：发行说明称 &quot;check 0600 permissions in load_from_json&quot;、&quot;make multisig deposit and withdraw outputs recoverable by the recipient&quot;、&quot;shut down non-interactive gRPC console wallet on SIGTERM or SIGINT&quot;，所有片段均未提供对应实现代码，缺少 <code>load_from_json</code> 权限检查、离线签名输出可恢复性与信号处理的代码证据，标记为待验证。</p>
+</li>
+</ol>
+<p>（本版本为预发布版 v6.3.0-pre.0，上述多项为迁移与兼容性破坏点，评估结论仅基于已提供 diff。）</p>
+<h4>v6.3.0-pre.1</h4>
+<ul>
+<li>仓库：<a href="https://github.com/tari-project/tari"><code>tari-project/tari</code></a></li>
+<li>发布日期：2026-10-28T13:05:56Z</li>
+<li>版本类型：预发布版</li>
+<li>Release：<a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.1">打开发布页</a></li>
+<li>代码比较：<code>v6.3.0-pre.0</code> → <code>v6.3.0-pre.1</code></li>
+<li>审查模式：完整审查</li>
+<li>审查结论：<strong>不重要</strong></li>
+<li><strong>升级建议：</strong> 预发布版生产暂缓</li>
+<li><strong>建议理由：</strong> 当前为预发布版，生产节点暂缓升级；正式版发布后再评估。</li>
+<li><strong>重点标记：</strong> 无</li>
+<li><strong>标记依据：</strong> 无</li>
+</ul>
+<h5>AI 审查</h5>
+<p>本次变更仅包含 Cargo.toml、Cargo.lock 中的版本号同步（6.3.0-pre.0 → 6.3.0-pre.1）以及外部依赖 <code>tari_sidechain</code> 7.0.0 → 8.0.0 的升级（连带 <code>tari_jellyfish</code> 6.2.1 → 7.0.0、移除外部 <code>tari_hashing</code> 6.2.0 依赖），与发行说明“chore(deps): use tari_sidechain 8.0.0 so pre-release crates can be published”一致。所给 diff 中没有任何业务、共识或验证逻辑代码改动，发行说明也未声明硬分叉、共识规则变更或破坏性变更，因此无从确认存在上述重大风险，也不能仅凭依赖主版本号变化推测后果。</p>
+<p>未发现需要单独报告的重大变更。</p>
+<p>补充：该版本为预发布版（v6.3.0-pre.1），不建议直接用于生产环境。</p>
+</article></main></body></html>
