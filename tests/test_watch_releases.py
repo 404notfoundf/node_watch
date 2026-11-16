@@ -398,7 +398,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("## tari", body)
         release_summary = body[body.index("### `v2`"):]
         self.assertIn("### `v2` · 完整审查", release_summary)
-        self.assertIn("优先关注：** Breaking Notes / Breaking Changes（破坏性变更）声明待核实 · 重大共识变更声明待核实", release_summary)
+        self.assertIn("优先关注：** ⚠️ Breaking Notes / Breaking Changes（破坏性变更）声明待核实 · 重大共识变更声明待核实", release_summary)
         self.assertIn("处置结论：** 需人工核实后再决定升级", release_summary)
         self.assertIn("发行说明涉及破坏性变更、共识变更、安全等重大声明", release_summary)
         self.assertIn("待核实 — 共识变更：** 发行说明称‘side-chain claimable burn 需 canonical script 验证’", release_summary)

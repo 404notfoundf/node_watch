@@ -518,7 +518,7 @@ def issue_evidence(meta: dict) -> tuple[list[tuple[str, str]], list[tuple[str, s
         else:
             label = f"{category}{'风险' if status == '风险' else '修复' if status == '修复' else ''}"
         if category == "破坏性变更":
-            priority_label = "Breaking Notes / Breaking Changes（破坏性变更）"
+            priority_label = "⚠️ Breaking Notes / Breaking Changes（破坏性变更）"
         elif category == "硬分叉/共识":
             priority_label = "硬分叉" if label == "硬分叉" else "重大共识变更"
         else:

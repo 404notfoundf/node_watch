@@ -43,7 +43,7 @@ on:
   workflow_dispatch:
 ```
 
-将 `cron` 替换为想要的频率即可；保留一条 schedule，避免同时启用多个定时频率。`*/30 * * * *` 表示每 30 分钟，`0 * * * *` 表示每小时。GitHub Actions 的最短 schedule 间隔为 5 分钟；默认按 UTC 调度，运行也可能延迟。详见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule)。
+将 `cron` 替换为想要的频率即可；保留一条 schedule，避免同时启用多个定时频率。默认使用 `7,37 * * * *`，每小时在第 7 分和第 37 分运行一次；北京时间对应 08:07、08:37、09:07、09:37 等，仍是每 30 分钟一次，并避开整点启动高峰。`*/30 * * * *` 表示每小时第 0 分和第 30 分运行，`0 * * * *` 表示每小时运行一次。GitHub Actions 的最短 schedule 间隔为 5 分钟；默认按 UTC 调度，运行也可能延迟。详见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule)。
 
 ## 在本地运行
 
