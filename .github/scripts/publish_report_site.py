@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import binascii
 import html
 import json
 import re
@@ -17,7 +15,6 @@ from markdown_it import MarkdownIt
 
 
 REPORT_MARKER_RE = re.compile(r"(?m)^[ \t]*<!-- watch-release(?:-keys)?:[^\r\n]*-->[ \t]*(?:\r?\n|$)")
-REPORT_KEYS_RE = re.compile(r"<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->\Z")
 RUN_ID_RE = re.compile(r"\d+-\d+")
 STYLE = """
 :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
@@ -55,27 +52,7 @@ def page(title: str, body: str) -> str:
     )
 
 
-def report_release_keys(markdown: str) -> list[list[str]]:
-    first_line = markdown.splitlines()[0] if markdown.splitlines() else ""
-    match = REPORT_KEYS_RE.fullmatch(first_line)
-    if not match:
-        return []
-    encoded = match.group(1)
-    try:
-        payload = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
-        keys = json.loads(payload.decode("utf-8"))
-    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError("Invalid processed Release keys in report") from error
-    if not isinstance(keys, list) or any(
-        not isinstance(key, list) or len(key) != 3 or not all(isinstance(part, str) and part for part in key)
-        for key in keys
-    ):
-        raise ValueError("Invalid processed Release keys in report")
-    return keys
-
-
 def render_report(markdown: str, report_id: str) -> tuple[str, dict]:
-    release_keys = report_release_keys(markdown)
     clean_markdown = REPORT_MARKER_RE.sub("", markdown).strip()
     batch_match = re.search(r"(?m)^## 检查批次\s+(.+)$", clean_markdown)
     batch = batch_match.group(1).strip() if batch_match else "未知批次"
@@ -91,7 +68,6 @@ def render_report(markdown: str, report_id: str) -> tuple[str, dict]:
         "published_at": datetime.now(timezone.utc).isoformat(),
         "coin_count": len(re.findall(r"(?m)^###\s+\S", clean_markdown)),
         "release_count": len(re.findall(r"(?m)^####\s+\S", clean_markdown)),
-        "release_keys": release_keys,
     }
     return page(title, body), metadata
 
@@ -124,28 +100,6 @@ def prune_reports(reports_dir: Path, cutoff: datetime, current_id: str) -> None:
         metadata = read_metadata(report_dir)
         if metadata and metadata["id"] == report_dir.name and datetime.fromisoformat(metadata["published_at"]) < cutoff:
             shutil.rmtree(report_dir)
-
-
-def save_processed_release_keys(release_reports: Path, new_keys: list[list[str]]) -> None:
-    state_path = release_reports / "processed-release-keys.json"
-    if state_path.is_symlink():
-        raise ValueError("Pages processed Release state must not be a symlink")
-    existing = []
-    if state_path.exists():
-        try:
-            existing = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
-            raise ValueError("Could not read Pages processed Release state") from error
-        if not isinstance(existing, list) or any(
-            not isinstance(key, list) or len(key) != 3 or not all(isinstance(part, str) and part for part in key)
-            for key in existing
-        ):
-            raise ValueError("Invalid Pages processed Release state")
-    combined = {tuple(key) for key in [*existing, *new_keys]}
-    state_path.write_text(
-        json.dumps([list(key) for key in sorted(combined)], ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
 
 
 def write_index(site_dir: Path) -> None:
@@ -221,6 +175,10 @@ def publish_report(report_dir: Path, site_dir: Path, run_id: str, attempt: str, 
     release_reports = site_dir / "release-reports"
     if release_reports.is_symlink():
         raise ValueError("Pages release-reports path must not be a symlink")
+    legacy_state = release_reports / "processed-release-keys.json"
+    if legacy_state.is_symlink():
+        raise ValueError("Legacy Pages Release state must not be a symlink")
+    legacy_state.unlink(missing_ok=True)
     reports_root = release_reports / "reports"
     if reports_root.is_symlink():
         raise ValueError("Pages reports path must not be a symlink")
@@ -243,7 +201,6 @@ def publish_report(report_dir: Path, site_dir: Path, run_id: str, attempt: str, 
     (report_path / "metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    save_processed_release_keys(release_reports, metadata["release_keys"])
     write_index(site_dir)
     return f"release-reports/reports/{report_id}/index.html"
 

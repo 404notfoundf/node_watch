@@ -454,6 +454,26 @@ class WatchReleaseTests(unittest.TestCase):
             finally:
                 watch.REPORTS = original_reports
 
+    def test_pages_release_state_does_not_override_issue_deduplication(self):
+        issue_keys = [("tari", "tari-project/tari", "v6.3.0-pre.2")]
+        pages_keys = [("tari", "tari-project/tari", "v6.3.0-pre.4")]
+        encoded = watch.base64.urlsafe_b64encode(json.dumps(issue_keys).encode()).decode().rstrip("=")
+        original_reports = watch.REPORTS
+        with tempfile.TemporaryDirectory() as temp_dir:
+            watch.REPORTS = Path(temp_dir) / "reports"
+            watch.REPORTS.mkdir()
+            state_file = Path(temp_dir) / "processed-release-keys.json"
+            state_file.write_text(json.dumps(pages_keys), encoding="utf-8")
+            issues = [{
+                "author": {"login": "github-actions[bot]"},
+                "body": f"<!-- watch-release-keys: {encoded} -->",
+            }]
+            try:
+                with patch.dict(os.environ, {"PAGES_RELEASE_STATE_FILE": str(state_file)}):
+                    self.assertEqual(watch.reported_releases(issues), set(issue_keys))
+            finally:
+                watch.REPORTS = original_reports
+
     def test_github_issue_history_uses_paginated_api_in_actions(self):
         first_page = [{"number": number} for number in range(100)]
         second_page = [{"number": 100}]

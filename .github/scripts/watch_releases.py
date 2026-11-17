@@ -1387,7 +1387,6 @@ def format_release(
 
 def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, str]]:
     found = set()
-    found.update(pages_release_state())
     for report in REPORTS.rglob("*.md"):
         coin = tag = None
         for line in report.read_text(encoding="utf-8").splitlines():
@@ -1420,25 +1419,6 @@ def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, s
                 continue
             found.update(tuple(key) for key in keys)
     return found
-
-
-def pages_release_state() -> set[tuple[str, str, str]]:
-    state_file = os.environ.get("PAGES_RELEASE_STATE_FILE", "").strip()
-    if not state_file:
-        return set()
-    path = Path(state_file)
-    if not path.exists():
-        return set()
-    try:
-        keys = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"Could not read processed Release state from {path}: {error}") from error
-    if not isinstance(keys, list) or any(
-        not isinstance(key, list) or len(key) != 3 or not all(isinstance(part, str) and part for part in key)
-        for key in keys
-    ):
-        raise RuntimeError(f"Invalid processed Release state in {path}")
-    return {tuple(key) for key in keys}
 
 
 def release_review_sections(text: str, coin: str, issue: bool = False) -> dict[str, str]:
@@ -1559,11 +1539,7 @@ def append_report_batch(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -
     REPORTS.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
     report = REPORTS / f"{now.strftime('%Y-%m-%dT%H-%M-%S-%fZ')}.md"
-    encoded_keys = base64.urlsafe_b64encode(
-        json.dumps(release_keys(entries), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii").rstrip("=")
     lines = [
-        f"<!-- watch-release-keys: {encoded_keys} -->",
         "# 节点版本审查报告",
         "",
         f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
