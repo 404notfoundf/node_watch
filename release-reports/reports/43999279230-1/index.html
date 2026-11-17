@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>节点版本审查报告 · 2026-11-17 02:41:37 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>节点版本审查报告</h1>
+<h2>检查批次 2026-11-17 02:41:37 UTC</h2>
+<h3>tari</h3>
+<h4>v6.3.0-pre.2 · 预发布版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: tari-project/tari --&gt;</p>
+<ul>
+<li><strong>重点标记：</strong> 🚨 <strong>破坏性变更</strong>（已确认） · 🚨 <strong>重大共识变更</strong>（已确认） · ✅ <strong>安全</strong>（修复） · ✅ <strong>稳定性/数据</strong>（修复）</li>
+<li><strong>处置建议：</strong> 预发布版重大事项 · 重点关注</li>
+<li><strong>建议理由：</strong> 已确认硬分叉或重大共识变更，应核对网络生效条件和节点兼容要求。 当前为预发布版，不建议直接用于生产升级；应评估现网影响并跟进正式版。</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li>
+<p><strong>破坏性变更（已确认）</strong>：<code>base_layer/core/src_chain_storage/active_validator_node.rs</code>（即 <code>base_layer/core/src/chain_storage/active_validator_node.rs</code>）为 <code>ValidatorNodeEntry</code> 新增 <code>original_registration</code>，<code>deserialize_original_registration</code> 刻意让旧版本写入的条目解码失败并提示“the chain database must be resynced”，该条目经 <code>validator_node_store.rs</code> 的 <code>lmdb_get::&lt;_, ValidatorNodeEntry&gt;</code> 进入 VN 集合与 <code>validator_node_mr</code> 计算。含验证节点注册记录的既有链库升级后必须全量重同步，否则 VN 查询与出块路径报解码错误。</p>
+</li>
+<li>
+<p><strong>硬分叉/共识（已确认）</strong>：<code>base_layer/core/src/validation/aggregate_body/aggregate_body_chain_validator.rs</code> 的 <code>find_unknown_inputs</code> 现在把 <code>ContainsSTxO</code> 与 <code>UnknownInput</code> 同等给予“body 内重建同 hash 输出”豁免，保留花费历史的归档节点对花费重建输出的 body 由 <code>ContainsSTxO</code> 拒绝变为接受，可提交区块集合发生变化。发行说明未声明硬分叉，代码注释表明该改动旨在消除归档与剪枝节点的判定分歧。</p>
+</li>
+<li>
+<p><strong>稳定性/数据（修复）</strong>：<code>chain_storage/utxo_mined_info.rs</code> 新增 <code>MinedInfo::latest</code>，<code>base_node/comms_interface/inbound_handlers.rs</code>、<code>rpc/service.rs</code>、<code>query_service.rs</code> 改为只有最新实例自身的花费才算已花费，<code>CheckOutputSpentStatus</code>、<code>query_deleted</code>、<code>get_utxos_deleted_info</code> 在重复输出场景下的结果随之改变。另 libtor 升级到 <code>tari-libtor-core</code> 49.15.2（内含 Tor 0.4.9.15，#8194），对应修复当前 Tor 共识下基节点直接退出的问题。</p>
+</li>
+<li>
+<p><strong>安全（修复）</strong>：<code>applications/minotari_app_grpc/src/authentication/basic_auth.rs</code> 与 <code>server_interceptor.rs</code> 以常数时间 Basic 认证和按 IP 退避（60 秒内 5 次失败后 50ms→60s、跟踪上限 1024 个 IP）替换每请求 Argon2id，降低暴露 gRPC 端点的 CPU 消耗攻击面。<code>conversions/unblinded_output.rs</code> 以 <code>ZeroizeOutputKeys</code> 在含错误返回的所有退出路径清零私钥，并为 5 个含私钥的 proto 消息脱敏 <code>Debug</code>。</p>
+</li>
+</ol>
+<h5>版本信息</h5>
+<p>发布于 2026-10-29T01:28:17Z · 比较 <code>v6.3.0-pre.1</code> → <code>v6.3.0-pre.2</code> · <a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.2">打开 Release</a></p>
+<h4>v6.3.0-pre.4 · 预发布版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: tari-project/tari --&gt;</p>
+<ul>
+<li><strong>重点标记：</strong> ✅ <strong>安全</strong>（修复） · ✅ <strong>稳定性/数据</strong>（修复） · ⚠️ <strong>重大发行说明待核实：</strong> 共识/硬分叉声明</li>
+<li><strong>处置建议：</strong> 预发布版声明待核实 · 重点关注</li>
+<li><strong>建议理由：</strong> 预发布版中的重大声明尚未确认，不据此决定生产升级；等待正式版或更多证据。</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li>【安全】#8294 在 <code>base_layer/mmr/src/merkle_proof.rs::verify</code> 新增拒绝非叶子位置与 <code>pos &gt;= mmr_size</code>，并在 <code>merkle_mountain_range.rs</code> 修正 <code>find_leaf_index</code> 与 <code>get_leaf_hashes</code> 的叶子查找和上界，可阻断以父节点哈希或越界位置通过的伪造 Merkle 证明。</li>
+<li>【安全】#8323 在 <code>base_layer/core/src/mempool/unconfirmed_pool.rs::remove_by_commitments_and_kernel_excesses</code> 停止按 kernel 的 <code>burn_commitment</code> 匹配池内输出，防止他人伪造 burn_commitment 把未确认交易从内存池剔除。</li>
+<li>【安全】#8266 与 #8322 在 <code>comms/dht/src/network_discovery/admission.rs</code>、<code>join_gate.rs</code>、<code>on_connect.rs</code> 为 Join gossip 与 OnConnect 对等同步加入每源预算、冷却和超时，并在 <code>connectivity/metrics.rs</code> 按转发因子重算 flood-ban 计数，缓解对等发现泛洪与误封禁。</li>
+<li>【安全】#8169 在 <code>applications/minotari_app_grpc/src/authentication/basic_auth.rs</code> 截断日志中的 scheme 并拒绝含 <code>:</code> 的用户名，<code>server_interceptor.rs</code> 对非法凭据转为 fail-closed 拒绝全部请求，covenant 解析改用 <code>borsh::from_slice</code> 拒绝尾随字节。</li>
+<li>【安全】<code>minotari_app_utilities/src/identity_management.rs</code>（对应 #8149）在身份文件公钥/NodeId 与私钥不一致时以 <code>ExitCode::ConfigError</code> 拒绝启动且不覆盖私钥，阻断私钥被替换后继续运行。</li>
+<li>【稳定性/数据】#8245 在 <code>base_layer/core/src/chain_storage/blockchain_database.rs</code> 与 <code>lmdb_db.rs</code> 区分存储访问失败与数据损坏并在写锁下重验，健康或被并发改动的数据库不再被误判为损坏并触发回退。</li>
+<li>【稳定性/数据】#8260 在 <code>lmdb_db.rs::reset_chain_to_genesis</code> 把越过剪枝视界的 rewind 改为单事务原子重置到创世（<code>LostHeaderTip</code> 保证重置须强于被删除的最强头，失败不改库），但剪枝节点一旦触发将被清空至高度 0 并需全量重同步。</li>
+<li>【稳定性/数据】#8246 在 <code>lmdb_db.rs</code> 启动时修复或丢弃失效孤儿链尖并按子树驱逐孤儿，在 <code>inbound_handlers.rs</code> 对未知祖先或过旧 RandomX key 的块按每 peer 预算有界丢弃且不封禁。</li>
+<li>【稳定性/数据】#8244 在 <code>mempool/unconfirmed_pool.rs</code> 等把未成熟或锁仓花费排除出区块模板，并在模板高度重检脚本与契约，失败者连同后代直接从池中移除，日后恢复有效的花费也需重新广播。</li>
+<li>【稳定性/数据】<code>horizon_state_sync/synchronizer.rs</code> 改为最终 tranche 先提交再验 output root，失败时原子重置输出状态并检测 <code>LocalOutputStateInconsistent</code>，同时加入对端等待预算与 <code>SlowPeerFailure</code> 限速。</li>
+<li>【稳定性/数据】<code>validation/difficulty_calculator.rs</code> 与 <code>header_full_validator.rs</code> 在无给定 target 时按链上下文 VM key 校验孤儿与侧链头 PoW，修复此前用主链 VM key 导致的分叉头误拒或误收。</li>
+<li>【稳定性/数据】#8318 在 <code>inbound_handlers.rs</code> 用 <code>MinDifficultyCache</code> 把每算法目标回溯限制在 <code>difficulty_block_window × 算法数</code>，未命中算法改取 <code>min_pow_difficulty</code>，该 gossip 预校验门限在此场景变松但不改变最终区块规则。</li>
+</ol>
+<p><strong>待核实的发行说明主张</strong></p>
+<ol start="13">
+<li>【硬分叉/共识】发行说明主张 fix(validation): check chain-linked timelocks at the height the body is mined at 与 fix(validation): tighten kernel burn commitment checks。代码已证实 <code>aggregate_body_chain_validator.rs</code> 的 <code>verify_timelocks</code> 由 <code>current_height + 1</code> 改为 <code>current_height</code>、<code>aggregate_body_internal_validator.rs</code> 的 <code>check_total_burned</code> 新增拒绝非 burn kernel 携带 <code>burn_commitment</code>，但材料未给出其他完整验证阶段的对照，无法确认最终有效区块/交易集合是否改变，发行说明未声明硬分叉。</li>
+</ol>
+<h5>版本信息</h5>
+<p>发布于 2026-11-10T11:57:54Z · 比较 <code>v6.3.0-pre.2</code> → <code>v6.3.0-pre.4</code> · <a href="https://github.com/tari-project/tari/releases/tag/v6.3.0-pre.4">打开 Release</a></p>
+<hr>
+<p>审查范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整审查”标识为准。</p>
+</article></main></body></html>
