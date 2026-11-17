@@ -1,0 +1,19 @@
+{
+  "id": "44026799633-1",
+  "batch": "2026-11-17 07:03:08 UTC",
+  "published_at": "2026-11-17T07:03:24.986603+00:00",
+  "coin_count": 1,
+  "release_count": 2,
+  "release_keys": [
+    [
+      "tari",
+      "tari-project/tari",
+      "v6.3.0-pre.2"
+    ],
+    [
+      "tari",
+      "tari-project/tari",
+      "v6.3.0-pre.4"
+    ]
+  ]
+}
