@@ -1197,6 +1197,7 @@ def format_release(
 
 def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, str]]:
     found = set()
+    found.update(pages_release_state())
     for report in REPORTS.rglob("*.md"):
         coin = tag = None
         for line in report.read_text(encoding="utf-8").splitlines():
@@ -1229,6 +1230,25 @@ def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, s
                 continue
             found.update(tuple(key) for key in keys)
     return found
+
+
+def pages_release_state() -> set[tuple[str, str, str]]:
+    state_file = os.environ.get("PAGES_RELEASE_STATE_FILE", "").strip()
+    if not state_file:
+        return set()
+    path = Path(state_file)
+    if not path.exists():
+        return set()
+    try:
+        keys = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Could not read processed Release state from {path}: {error}") from error
+    if not isinstance(keys, list) or any(
+        not isinstance(key, list) or len(key) != 3 or not all(isinstance(part, str) and part for part in key)
+        for key in keys
+    ):
+        raise RuntimeError(f"Invalid processed Release state in {path}")
+    return {tuple(key) for key in keys}
 
 
 def release_review_sections(text: str, coin: str, issue: bool = False) -> dict[str, str]:
@@ -1279,15 +1299,20 @@ def historical_prerelease_reviews(
         return ""
 
     reviews: dict[str, str] = {}
-    for report in sorted(REPORTS.rglob("*.md")):
-        try:
-            content = report.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            continue
-        for tag, section in release_review_sections(content, coin).items():
-            repositories = set(REPORT_REPO_RE.findall(section)) | set(REPORT_HIDDEN_REPO_RE.findall(section))
-            if prerelease_series(tag) == stable_tag and repo in repositories:
-                reviews[tag] = section
+    report_roots = [REPORTS]
+    pages_history = os.environ.get("PAGES_HISTORICAL_REPORTS_DIR", "").strip()
+    if pages_history:
+        report_roots.append(Path(pages_history))
+    for report_root in report_roots:
+        for report in sorted(report_root.rglob("*.md")):
+            try:
+                content = report.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            for tag, section in release_review_sections(content, coin).items():
+                repositories = set(REPORT_REPO_RE.findall(section)) | set(REPORT_HIDDEN_REPO_RE.findall(section))
+                if prerelease_series(tag) == stable_tag and repo in repositories:
+                    reviews[tag] = section
 
     for issue in issues or []:
         author = issue.get("author") or issue.get("user") or {}
@@ -1344,7 +1369,15 @@ def append_report_batch(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -
     REPORTS.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
     report = REPORTS / f"{now.strftime('%Y-%m-%dT%H-%M-%S-%fZ')}.md"
-    lines = ["# 节点版本审查报告", "", f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"]
+    encoded_keys = base64.urlsafe_b64encode(
+        json.dumps(release_keys(entries), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    lines = [
+        f"<!-- watch-release-keys: {encoded_keys} -->",
+        "# 节点版本审查报告",
+        "",
+        f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+    ]
     for coin in sorted(entries):
         lines.extend(["", f"### {coin}"])
         updates = sorted(
@@ -1371,6 +1404,30 @@ def batch_releases(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> lis
 
 def release_keys(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> list[tuple[str, str, str]]:
     return [(coin, repo, meta["tag"]) for coin, repo, meta in batch_releases(entries)]
+
+
+def notification_entries(
+    entries: dict[str, dict[str, list[tuple[dict, str]]]],
+) -> dict[str, dict[str, list[tuple[dict, str]]]]:
+    selected = {}
+    for coin, repos in entries.items():
+        for repo, releases in repos.items():
+            important = [(meta, body) for meta, body in releases if release_requires_notification(meta)]
+            if important:
+                selected.setdefault(coin, {})[repo] = important
+    return selected
+
+
+def release_requires_notification(meta: dict) -> bool:
+    if meta.get("risk") in {"P0", "P1"}:
+        return True
+    statuses = meta.get("highlight_statuses", {})
+    if not isinstance(statuses, dict):
+        return False
+    return any(
+        statuses.get(category) in HIGHLIGHT_FIELDS[category] - {"无"}
+        for category in HIGHLIGHT_FIELDS
+    )
 
 
 def batch_digest(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> str:
@@ -1421,7 +1478,11 @@ def notify_logins() -> list[str]:
     return result
 
 
-def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_failures: int = 0) -> str:
+def issue_body(
+    entries: dict[str, dict[str, list[tuple[dict, str]]]],
+    pending_failures: int = 0,
+    include_mentions: bool = False,
+) -> str:
     releases = batch_releases(entries)
     encoded_keys = base64.urlsafe_b64encode(
         json.dumps(release_keys(entries), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1437,6 +1498,18 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
             for coin, repos in sorted(entries.items())
         ) + "。",
     ]
+    triggered = [
+        (coin, meta)
+        for coin, _repo, meta in releases
+        if release_requires_notification(meta)
+    ]
+    if triggered:
+        lines.extend(["", "**通知触发版本：**"])
+        for coin, meta in triggered:
+            highlights = meta.get("highlights") or ""
+            if highlights == "无":
+                highlights = f"风险级别 {meta.get('risk', '需关注')}"
+            lines.append(f"- {coin} `{meta['tag']}`：{highlights}")
     for coin in sorted(entries):
         coin_releases = sorted(
             (entry for entry in releases if entry[0] == coin),
@@ -1464,9 +1537,10 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
             lines.append(f"- **下一步：** {issue_action_line(meta)}")
     if pending_failures:
         lines.extend(["", f"> ⚠️ 另有 {pending_failures} 项检查未完成，尚未标记为已处理；请查看 Actions 日志，后续轮询会重试。"])
-    mentions = notify_logins()
-    if mentions:
-        lines.extend(["", "通知对象：" + " ".join(f"@{login}" for login in mentions)])
+    if include_mentions:
+        mentions = notify_logins()
+        if mentions:
+            lines.extend(["", "通知对象：" + " ".join(f"@{login}" for login in mentions)])
 
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
@@ -1483,8 +1557,11 @@ def issue_body(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_fa
 def prepare_batch_issue(entries: dict[str, dict[str, list[tuple[dict, str]]]], pending_failures: int = 0) -> None:
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
+    notify_entries = notification_entries(entries)
+    if not notify_entries:
+        print("No major release findings; creating an Issue without @mentions.", flush=True)
     body_file = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / f"upstream-release-issue-{batch_digest(entries)}.md"
-    body = issue_body(entries, pending_failures)
+    body = issue_body(entries, pending_failures, include_mentions=bool(notify_entries))
     body_file.write_text(body, encoding="utf-8")
     set_workflow_output("issue_title", issue_title(entries))
     set_workflow_output("issue_body_path", str(body_file))

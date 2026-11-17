@@ -1,6 +1,6 @@
 # GitHub Release Watch
 
-这个仓库用 GitHub Actions 按配置的频率检查公开 GitHub 仓库。发现新 Release 后，会比较相邻 Release tag 之间的代码差异，调用配置的 AI 做静态审阅。每轮生成一份按币种和版本分段的完整报告，醒目标出破坏性变更、硬分叉/共识、兼容性、内存问题、安全和稳定性/数据相关事项。工作流创建一条汇总 Issue，将完整报告发布为可在线阅读的 GitHub Pages 网页，并保留 90 天的 Markdown Artifact 供下载。Pages 历史报告保存在独立的 `gh-pages` 分支中，超过 180 天的目录会在下次发布时从当前网站清理；分支的 Git 提交历史仍保留先前内容。报告不会提交到默认分支的 `reports/` 目录。
+这个仓库用 GitHub Actions 按配置的频率检查公开 GitHub 仓库。发现新 Release 后，会比较相邻 Release tag 之间的代码差异，调用配置的 AI 做静态审阅。每轮生成一份按币种和版本分段的完整报告，醒目标出破坏性变更、硬分叉/共识、兼容性、内存问题、安全和稳定性/数据相关事项。所有报告都会发布为可在线阅读的 GitHub Pages 网页、Markdown Artifact，并创建汇总 Issue；只有 AI 判断存在重大事项时，Issue 才会 @通知配置的用户。Pages 历史报告和已处理版本记录保存在独立的 `gh-pages` 分支中，超过 180 天的报告目录会在下次发布时从当前网站清理；版本去重记录不会随报告过期。分支的 Git 提交历史仍保留先前内容。报告不会提交到默认分支的 `reports/` 目录。
 
 ## 配置监控对象
 
@@ -24,7 +24,7 @@ coins:
 
 AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的 API 根地址（例如以 `/v1` 结尾），脚本会补上 `/chat/completions`。`diff_chunk_chars` 控制顺序审查时每个代码差异分段的字符数，默认建议 120,000；应根据所用模型的上下文窗口设置。在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 添加名为 `AI_API_KEY` 的 Secret。所有仓库共用该密钥；可在全局或单仓库 `ai` 配置中覆盖 `api_url`、`model`、`prompt` 和 `diff_chunk_chars`。
 
-可选地，在 **Settings → Secrets and variables → Actions → Variables** 设置 `NOTIFY_LOGINS`，填写逗号分隔的 GitHub 用户名以 @提及多个接收人。留空时默认 @提及仓库所有者；仓库属于组织时，组织账号提及不保证通知所有成员，建议填写具体用户。
+可选地，在 **Settings → Secrets and variables → Actions → Variables** 设置 `NOTIFY_LOGINS`，填写逗号分隔的 GitHub 用户名作为重大事项的 @通知接收人。留空时默认 @提及仓库所有者；仓库属于组织时，组织账号提及不保证通知所有成员，建议填写具体用户。重大事项指风险级别为 P0/P1，或 AI 的任一重点标记不是“无”。注意：仓库 Watch 设置为接收 Issues 或所有活动的用户，仍可能收到每一条新 Issue 的通知；若只想接收被 @提及时的通知，应将仓库通知设为 **Participating and @mentions**。
 
 ## 在 GitHub Actions 中运行
 
@@ -32,7 +32,7 @@ AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的
 2. 按上文填写 `config/watch.yaml` 并添加 `AI_API_KEY` Secret。
 3. 在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。Pages 报告是公开网页。
 4. 在仓库 **Settings → Actions → General → Workflow permissions** 允许工作流 token 写入仓库内容；工作流会把历史网页保存在 `gh-pages` 分支，另外使用 `issues: write` 创建汇总 Issue、使用 Pages 部署权限发布网页。可设置 `NOTIFY_LOGINS` 指定通知用户；未设置时默认提及仓库所有者。
-5. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；发现更新时先上传完整报告 Artifact、发布网页，再创建带在线报告链接的汇总 Issue。已处理版本记录在 Issue 中，避免重复报告。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
+5. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；每个新版本都会生成完整报告并发布网页、Artifact，同时为本轮更新创建一条汇总 Issue。只有达到上述重大事项条件时，Issue 才会 @通知接收人。所有已处理版本的去重键保存在 `gh-pages`，不会重复审查。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
 
 调整轮询频率时，编辑 [.github/workflows/watch-releases.yml](.github/workflows/watch-releases.yml) 中的 `schedule`。例如每 15 分钟运行一次：
 
