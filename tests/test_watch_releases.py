@@ -20,6 +20,15 @@ PUBLISH_SPEC.loader.exec_module(publish_site)
 
 
 class WatchReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.cache_dir = tempfile.TemporaryDirectory()
+        self.original_review_cache = watch.REVIEW_CACHE
+        watch.REVIEW_CACHE = Path(self.cache_dir.name)
+
+    def tearDown(self):
+        watch.REVIEW_CACHE = self.original_review_cache
+        self.cache_dir.cleanup()
+
     def test_pages_report_hides_marker_and_escapes_raw_html(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -207,6 +216,7 @@ class WatchReleaseTests(unittest.TestCase):
                         patch.object(watch, "release_window_after_running_version", return_value=(
                             [{"tag_name": "v3"}, {"tag_name": "v4"}, {"tag_name": "v5"}], "v2",
                         )), patch.object(watch, "release_diff", side_effect=lambda repo, previous, tag: diff_calls.append((previous, tag)) or "diff"), \
+                        patch.object(watch, "ask_ai_fast_batch", return_value=None), \
                         patch.object(watch, "ask_ai", return_value=analysis), patch("builtins.print"):
                     watch.main()
                 self.assertEqual(diff_calls, [("v2", "v3"), ("v3", "v4")])
@@ -245,6 +255,64 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(result, "analysis")
         self.assertEqual(len(captured), 1)
         self.assertIn("FAST PRECHECK", captured[0]["messages"][1]["content"])
+
+    def test_fast_batch_binds_each_result_to_its_requested_release(self):
+        settings = {"api_url": "https://ai.example/v1", "model": "test"}
+        candidates = [
+            {"repo": "owner/repo", "release": {"tag_name": "v1", "body": "first"}, "previous_tag": "v0", "diff": "diff a", "target_network": "mainnet"},
+            {"repo": "owner/repo", "release": {"tag_name": "v2", "body": "second"}, "previous_tag": "v1", "diff": "diff b", "target_network": "mainnet"},
+        ]
+        ids = [watch.fast_batch_id(item["repo"], item["release"], item["previous_tag"]) for item in candidates]
+        response = f"--- REVIEW {ids[0]} ---\nfirst analysis\n--- REVIEW {ids[1]} ---\nsecond analysis"
+
+        with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
+                patch.object(watch.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps({
+                    "choices": [{"message": {"content": response}}]
+                }).encode())):
+            analyses = watch.ask_ai_fast_batch(settings, candidates)
+
+        self.assertEqual(analyses, {ids[0]: "first analysis", ids[1]: "second analysis"})
+
+    def test_fast_batch_rejects_missing_or_duplicate_results(self):
+        self.assertIsNone(watch.parse_fast_batch_response("--- REVIEW 0000000000000000 ---\nanalysis", {
+            "0000000000000000", "1111111111111111",
+        }))
+        self.assertIsNone(watch.parse_fast_batch_response(
+            "--- REVIEW 0000000000000000 ---\na\n--- REVIEW 0000000000000000 ---\nb",
+            {"0000000000000000"},
+        ))
+
+    def test_fast_batch_escalates_any_risk_or_malformed_result_to_full_review(self):
+        self.assertFalse(watch.fast_batch_requires_full_review(
+            "风险级别：P3\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无"
+        ))
+        self.assertTrue(watch.fast_batch_requires_full_review(
+            "风险级别：P3\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=无；安全=风险；稳定性/数据=无"
+        ))
+        self.assertTrue(watch.fast_batch_requires_full_review("not a valid review"))
+
+    def test_chunk_cache_key_changes_with_prompt_or_diff(self):
+        first = watch.review_cache_key("chunk-v1", "model", "prompt one", "diff one")
+        self.assertNotEqual(first, watch.review_cache_key("chunk-v1", "model", "prompt two", "diff one"))
+        self.assertNotEqual(first, watch.review_cache_key("chunk-v1", "model", "prompt one", "diff two"))
+
+    def test_chunk_review_cache_reuses_only_completed_matching_segments(self):
+        calls = []
+
+        def urlopen(request, timeout):
+            calls.append(json.loads(request.data.decode("utf-8")))
+            content = f"response {len(calls)}"
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
+
+        settings = {"api_url": "https://ai.example/v1", "model": "test", "diff_chunk_chars": 4}
+        with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
+                patch.object(watch.urllib.request, "urlopen", side_effect=urlopen):
+            first = watch.ask_ai(settings, "owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", "abcdefghij")
+            second = watch.ask_ai(settings, "owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", "abcdefghij")
+
+        self.assertEqual(first, "response 4")
+        self.assertEqual(second, "response 5")
+        self.assertEqual(len(calls), 5)
 
     def test_highlight_summary_marks_major_changes(self):
         analysis = (
@@ -290,7 +358,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn(f"- **重点标记：** {summary}", report)
         self.assertIn("#### v1 · 正式版 · 完整审查", report)
         self.assertIn("<!-- watch-repo: owner/repo -->", report)
-        self.assertNotIn("### v1", report)
+        self.assertNotIn("\n### v1\n", report)
         self.assertNotIn(f"- **标记依据：** {reasons}", report)
         self.assertNotIn("重点标记依据：", report)
         self.assertNotIn("省略", report)
@@ -372,9 +440,12 @@ class WatchReleaseTests(unittest.TestCase):
                 "风险级别：P1\n重点标记：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
                 "内存问题=修复；安全=无；稳定性/数据=无\n"
                 "重点标记依据：破坏性变更=无；硬分叉/共识=无；兼容性=无；"
-                "内存问题=src/cache.rs 修复缓存未释放；安全=无；稳定性/数据=无\n1. Finding"
+                "内存问题=`src/cache.rs` 修复缓存未释放；安全=无；稳定性/数据=无\n1. Finding"
             )
-            return watch.format_release(coin, repo, {"tag_name": tag}, "previous", analysis)
+            return watch.format_release(
+                coin, repo, {"tag_name": tag}, "previous", analysis,
+                changed_paths={"src/cache.rs"},
+            )
 
         entries = {
             "tari": {"tari-project/tari": [entry("tari", "tari-project/tari", "v6.2.0")]},
@@ -387,7 +458,7 @@ class WatchReleaseTests(unittest.TestCase):
             "GITHUB_RUN_ID": "12345",
             "NOTIFY_LOGINS": "",
         }):
-            body = watch.issue_body(entries)
+            body = watch.issue_body(entries, include_mentions=True)
             title = watch.issue_title(entries)
 
         self.assertIn("3 个新版本", body)
@@ -403,7 +474,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("完整审查", body)
         self.assertIn("建议升级", body)
         self.assertIn("下一步：** 建议在维护窗口升级到 `v1`", body)
-        self.assertIn("1. **已确认 — 内存问题修复：** src/cache.rs 修复缓存未释放", body)
+        self.assertIn("1. **已确认 — 内存问题修复：** `src/cache.rs` 修复缓存未释放", body)
         self.assertEqual(body.count("  1. **已确认 — 内存问题修复：**"), 3)
         self.assertNotIn("标记依据", body)
         self.assertNotIn("1. Finding", body)

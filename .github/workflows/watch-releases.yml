@@ -52,6 +52,13 @@ jobs:
           python-version: '3.13'
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Restore review checkpoints
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-review-cache
+          key: release-review-cache-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            release-review-cache-v1-
       - name: Review new GitHub Releases
         id: review
         env:
@@ -60,6 +67,12 @@ jobs:
           NOTIFY_LOGINS: ${{ vars.NOTIFY_LOGINS }}
           PAGES_HISTORICAL_REPORTS_DIR: ${{ runner.temp }}/pages-history/release-reports/reports
         run: python .github/scripts/watch_releases.py
+      - name: Save review checkpoints
+        if: always() && hashFiles('.release-review-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .release-review-cache
+          key: release-review-cache-v1-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload full report
         id: upload
         if: always() && steps.review.outputs.report_path != ''

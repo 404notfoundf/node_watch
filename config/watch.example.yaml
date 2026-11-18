@@ -30,6 +30,7 @@ ai:
 review:
   mode: auto
   max_releases_per_run: 3 # 每轮最多审查的新 Release 数；剩余版本在下一轮继续。
+  fast_batch_size: 3 # 最多合并 3 个低风险快速预检；异常时自动逐版本重审。
 
 coins:
   example_coin:
