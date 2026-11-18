@@ -36,7 +36,9 @@ MAX_REFERENCE_PRS = 6
 MAX_REFERENCE_COMMITS = 4
 MAX_REFERENCE_PATCH_CHARS = 30_000
 REVIEW_MODES = {"auto", "fast", "full"}
-PRERELEASE_TAG_RE = re.compile(r"(?:^|[-.])(?:pre|preview|alpha|beta|rc|dev)(?=$|[-.]|\d)", re.IGNORECASE)
+PRERELEASE_TAG_RE = re.compile(
+    r"(?:^|[-.])(?:pre|preview|alpha|beta|rc|dev|test(?:net)?)(?=$|[-.]|\d)", re.IGNORECASE,
+)
 FULL_REVIEW_NOTE_RE = re.compile(
     r"hard[ -]?fork|硬分叉|activation[ -]?(?:height|block)|激活(?:高度|区块)|"
     r"(?:consensus|共识).*(?:rule|change|incompatib|规则|变更|不兼容)|"
@@ -243,10 +245,13 @@ def configured_repositories(config: dict):
         network = item.get("network")
         if network is not None and (not isinstance(network, str) or not network.strip()):
             raise ValueError(f"coins.{coin}.network must be a non-empty string when set")
+        include_prereleases = item.get("include_prereleases", True)
+        if type(include_prereleases) is not bool:
+            raise ValueError(f"coins.{coin}.include_prereleases must be a boolean")
         override = item.get("ai", {})
         if not isinstance(override, dict):
             raise ValueError(f"ai override for {repo} must be a mapping")
-        yield str(coin), repo, running_version, network.strip() if network else None, override
+        yield str(coin), repo, running_version, network.strip() if network else None, include_prereleases, override
 
 
 def github_json(path: str):
@@ -260,7 +265,9 @@ def github_json(path: str):
         return json.loads(response.read().decode("utf-8"))
 
 
-def release_window_after_running_version(repo: str, running_version: str) -> tuple[list[dict], str]:
+def release_window_after_running_version(
+    repo: str, running_version: str, include_prereleases: bool = True,
+) -> tuple[list[dict], str]:
     releases, page = [], 1
     while True:
         batch = github_json(f"repos/{repo}/releases?per_page=100&page={page}")
@@ -271,6 +278,12 @@ def release_window_after_running_version(repo: str, running_version: str) -> tup
     index = next((i for i, item in enumerate(releases) if item.get("tag_name") == running_version), None)
     if index is None:
         raise ValueError(f"{repo}: running_version {running_version!r} is not a published GitHub Release")
+    if not include_prereleases:
+        releases = [
+            item for item in releases
+            if item.get("tag_name") == running_version or release_channel(item) == "正式版"
+        ]
+        index = next(i for i, item in enumerate(releases) if item.get("tag_name") == running_version)
     window = list(reversed(releases[:index]))
     previous_stable = next(
         (item["tag_name"] for item in releases[index:] if release_channel(item) == "正式版"),
@@ -303,7 +316,11 @@ def release_channel(release: dict) -> str:
 
 
 def prerelease_series(tag: str) -> str | None:
-    match = re.fullmatch(r"(.+?)(?:[-.](?:pre|preview|alpha|beta|rc|dev)(?:[-.]?\d.*)?)", tag, re.IGNORECASE)
+    match = re.fullmatch(
+        r"(.+?)(?:[-.](?:pre|preview|alpha|beta|rc|dev|test(?:net)?)(?:[-.]?\d.*)?)",
+        tag,
+        re.IGNORECASE,
+    )
     return match.group(1) if match else None
 
 
@@ -2136,9 +2153,11 @@ def main() -> None:
     issue_history = github_issue_history() if should_read_github_issue_history() else None
     processed = reported_releases(issue_history)
     new_entries: dict[str, dict[str, list[tuple[dict, str]]]] = {}
-    for coin, repo, running_version, target_network, override in watched:
+    for coin, repo, running_version, target_network, include_prereleases, override in watched:
         try:
-            releases, previous = release_window_after_running_version(repo, running_version)
+            releases, previous = release_window_after_running_version(
+                repo, running_version, include_prereleases,
+            )
             pending_fast: list[dict] = []
             repo_failed = False
 

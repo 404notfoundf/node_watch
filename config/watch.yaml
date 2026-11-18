@@ -32,7 +32,22 @@ review:
 #     #   model: your-model
 #     #   prompt: ...
 coins:
-  tari:
-    repo: tari-project/tari
-    running_version: v6.2.0-pre.2
+  aleo:
+    repo: aleo-labs-protocol/snarkOS
+    running_version: v4.12.1
     network: mainnet
+    include_prereleases: false
+  alephium:
+    repo: alephium/alephium
+    running_version: v4.7.1
+    network: mainnet
+    include_prereleases: false
+  xbt:
+    repo: bitcoinknots/bitcoin
+    running_version: v29.4.3.knots20260508
+    network: mainnet
+    include_prereleases: false
+#  tari:
+#    repo: tari-project/tari
+#    running_version: v6.2.0-pre.2
+#    network: mainnet

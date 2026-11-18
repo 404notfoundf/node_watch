@@ -90,6 +90,23 @@ class WatchReleaseTests(unittest.TestCase):
         finally:
             watch.github_json = original
 
+    def test_release_window_can_exclude_prereleases(self):
+        original = watch.github_json
+        pages = [[
+            {"tag_name": "v4.13.1"},
+            {"tag_name": "testnet-v4.13.1"},
+            {"tag_name": "v4.13.0-test3", "prerelease": True},
+            {"tag_name": "v4.12.1"},
+        ], []]
+        watch.github_json = lambda _: pages.pop(0)
+        try:
+            releases, _ = watch.release_window_after_running_version(
+                "owner/repo", "v4.12.1", include_prereleases=False,
+            )
+            self.assertEqual([item["tag_name"] for item in releases], ["v4.13.1"])
+        finally:
+            watch.github_json = original
+
     def test_ai_retries_rate_limit_then_succeeds(self):
         calls = 0
 

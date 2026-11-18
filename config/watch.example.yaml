@@ -37,6 +37,7 @@ coins:
     repo: "owner/mining-node"
     running_version: "v1.0.0"
     network: "mainnet" # 设为该币种矿池实际运行的网络；未知时可省略，但 AI 不会假定主网。
+    # include_prereleases: false # 可选：跳过 pre/rc/test/testnet 等预发布版本。
     # 可选：覆盖此币种的 API 地址、模型或提示词；仍共用 GitHub Secret AI_API_KEY。
     # ai:
     #   api_url: "https://another-compatible-api.example/v1"
