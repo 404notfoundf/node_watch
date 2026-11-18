@@ -46,14 +46,14 @@ on:
 
 将 `cron` 替换为想要的频率即可；保留一条 schedule，避免同时启用多个定时频率。默认使用 `7,37 * * * *`，每小时在第 7 分和第 37 分运行一次；北京时间对应 08:07、08:37、09:07、09:37 等，仍是每 30 分钟一次，并避开整点启动高峰。`*/30 * * * *` 表示每小时第 0 分和第 30 分运行，`0 * * * *` 表示每小时运行一次。GitHub Actions 的最短 schedule 间隔为 5 分钟；默认按 UTC 调度，运行也可能延迟。详见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule)。
 
-### 可选：上次运行结束 30 分钟后再轮询
+### 可选：上次运行结束 10 分钟后再轮询（测试间隔）
 
-默认固定 cron 按时刻触发，不会从上次审查结束时间开始计时。如需“审查结束后至少间隔 30 分钟”，可启用独立 dispatcher：它每 5 分钟检查一次主工作流状态；上次默认分支审查完成满 30 分钟且当前没有审查运行时，才派发下一轮。这样不会因 `workflow_run` 递归触发限制而只运行一轮，也不会在长审查期间排队。GitHub schedule 可能延迟，因此下一轮会在 30 分钟后的某个检查 tick 启动，不保证精确到秒。
+默认固定 cron 按时刻触发，不会从上次审查结束时间开始计时。如需“审查结束后至少间隔 10 分钟”，可启用独立 dispatcher：它每 5 分钟检查一次主工作流状态；上次默认分支审查完成满 10 分钟且当前没有审查运行时，才派发下一轮。这样不会因 `workflow_run` 递归触发限制而只运行一轮，也不会在长审查期间排队。GitHub schedule 可能延迟，因此下一轮会在 10 分钟后的某个检查 tick 启动，不保证精确到秒。
 
 1. 在 **Settings → Secrets and variables → Actions → Variables** 新增 `RELEASE_POLL_COOLDOWN_ENABLED`，值设为 `true`。
 2. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次，作为首次轮询。
 
-启用后，主工作流原有固定 schedule 会被跳过，只有 dispatcher 检查到期后才会派发新审查；被跳过的 schedule 记录不会启动审查，也不会重置 30 分钟计时。dispatcher 只根据默认分支最近一次 `workflow_dispatch` 的完成时间计时；如果该仓库还没有这类运行，需要先手动启动一次主工作流。之前创建的 `release-poll-cooldown` Environment 和 Wait timer 不再需要。要恢复默认固定 cron，删除该变量或将值改为 `false`。
+启用后，主工作流原有固定 schedule 会被跳过，只有 dispatcher 检查到期后才会派发新审查；被跳过的 schedule 记录不会启动审查，也不会重置 10 分钟计时。dispatcher 只根据默认分支最近一次 `workflow_dispatch` 的完成时间计时；如果该仓库还没有这类运行，需要先手动启动一次主工作流。之前创建的 `release-poll-cooldown` Environment 和 Wait timer 不再需要。要恢复默认固定 cron，删除该变量或将值改为 `false`。
 
 ## 在本地运行
 

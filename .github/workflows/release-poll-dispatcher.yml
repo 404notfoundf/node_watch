@@ -17,7 +17,7 @@ jobs:
     if: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch a review after 30 idle minutes
+      - name: Dispatch a review after 10 idle minutes
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -49,8 +49,8 @@ jobs:
           completed_epoch="$(date -u -d "$completed_at" +%s)"
           now_epoch="$(date -u +%s)"
           elapsed_seconds=$((now_epoch - completed_epoch))
-          if (( elapsed_seconds < 1800 )); then
-            echo "Latest review completed $elapsed_seconds seconds ago; waiting until 30 minutes have elapsed."
+          if (( elapsed_seconds < 600 )); then
+            echo "Latest review completed $elapsed_seconds seconds ago; waiting until 10 minutes have elapsed."
             exit 0
           fi
 
