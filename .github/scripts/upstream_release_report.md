@@ -1,7 +1,7 @@
 #### {{tag}} · {{release_channel}} · {{review}}
 <!-- watch-repo: {{repo}} -->
 
-- **重点标记：** {{highlights}}
+- **优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：** {{highlights}}
 - **处置建议：** {{upgrade_advice}} · {{conclusion}}
 - **建议理由：** {{upgrade_reason}}
 
