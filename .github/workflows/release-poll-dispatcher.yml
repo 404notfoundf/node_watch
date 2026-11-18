@@ -1,38 +1,58 @@
 name: 节点版本审查间隔调度
 
 on:
-  workflow_run:
-    workflows:
-      - 节点版本审查
-    types:
-      - completed
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   actions: write
 
 concurrency:
-  # Ignored completions must not cancel an active cooldown.
-  group: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == github.event.repository.default_branch && github.event.workflow_run.conclusion != 'cancelled' && 'release-poll-cooldown-active' || 'release-poll-cooldown-inactive' }}
-  cancel-in-progress: true
+  group: release-poll-dispatcher
+  cancel-in-progress: false
 
 jobs:
   dispatch-next:
-    if: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == github.event.repository.default_branch && github.event.workflow_run.conclusion != 'cancelled' }}
+    if: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    environment:
-      name: release-poll-cooldown
-      deployment: false
     steps:
-      - name: Dispatch the next review after the cooldown
+      - name: Dispatch a review after 30 idle minutes
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          latest_dispatch_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch-releases.yml/runs?per_page=100" \
-            | jq -r --arg branch "$DEFAULT_BRANCH" '[.workflow_runs[] | select(.event == "workflow_dispatch" and .head_branch == $branch)] | first | .id // empty')"
-          if [[ "$latest_dispatch_run_id" != "$SOURCE_RUN_ID" ]]; then
-            echo "A newer manual or dispatcher run exists; skipping this stale cooldown."
+          active_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch-releases.yml/runs?status=in_progress&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')"
+          if [[ -z "$active_run_id" ]]; then
+            active_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch-releases.yml/runs?status=queued&per_page=1" \
+              --jq '.workflow_runs[0].id // empty')"
+          fi
+          if [[ -n "$active_run_id" ]]; then
+            echo "Review run $active_run_id is still active; the next timer tick will check again."
             exit 0
           fi
+
+          latest_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch-releases.yml/runs?event=workflow_dispatch&branch=$DEFAULT_BRANCH&per_page=1" \
+            --jq '.workflow_runs[0] | [.id, .status, (.completed_at // .updated_at)] | @tsv')"
+          if [[ -z "$latest_run" ]]; then
+            echo "No default-branch manual review exists yet; run 节点版本审查 once to start the cooldown cycle."
+            exit 0
+          fi
+
+          IFS=$'\t' read -r latest_run_id latest_run_status completed_at <<< "$latest_run"
+          if [[ "$latest_run_status" != "completed" || -z "$completed_at" ]]; then
+            echo "Latest review $latest_run_id has no completion time yet; skipping this timer tick."
+            exit 0
+          fi
+
+          completed_epoch="$(date -u -d "$completed_at" +%s)"
+          now_epoch="$(date -u +%s)"
+          elapsed_seconds=$((now_epoch - completed_epoch))
+          if (( elapsed_seconds < 1800 )); then
+            echo "Latest review completed $elapsed_seconds seconds ago; waiting until 30 minutes have elapsed."
+            exit 0
+          fi
+
+          echo "Latest review completed at $completed_at; dispatching the next review."
           gh workflow run watch-releases.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"

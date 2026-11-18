@@ -17,6 +17,12 @@ PUBLISH_SCRIPT = SCRIPT.with_name("publish_report_site.py")
 PUBLISH_SPEC = importlib.util.spec_from_file_location("publish_report_site", PUBLISH_SCRIPT)
 publish_site = importlib.util.module_from_spec(PUBLISH_SPEC)
 PUBLISH_SPEC.loader.exec_module(publish_site)
+EMPTY_AI_REVIEW = json.dumps({
+    "risk": "P3",
+    "highlights": {name: {"status": "无", "reason": "无"} for name in watch.HIGHLIGHT_FIELDS},
+    "confirmed_findings": [],
+    "pending_claims": [],
+}, ensure_ascii=False)
 
 
 class WatchReleaseTests(unittest.TestCase):
@@ -28,6 +34,20 @@ class WatchReleaseTests(unittest.TestCase):
     def tearDown(self):
         watch.REVIEW_CACHE = self.original_review_cache
         self.cache_dir.cleanup()
+
+    def test_split_diff_keeps_complete_files_together_when_they_fit(self):
+        first = "diff --git a/src/one.rs b/src/one.rs\n+++ b/src/one.rs\n+one\n"
+        second = "diff --git a/src/two.rs b/src/two.rs\n+++ b/src/two.rs\n+two\n"
+        chunks = watch.split_diff(first + second, len(first) + 5)
+
+        self.assertEqual(chunks, [first, second])
+
+    def test_split_diff_splits_only_a_file_that_exceeds_the_limit(self):
+        section = "diff --git a/src/large.rs b/src/large.rs\n+++ b/src/large.rs\n+1234\n+5678\n"
+        chunks = watch.split_diff(section, 45)
+
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual("".join(chunks), section)
 
     def test_pages_report_hides_marker_and_escapes_raw_html(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -78,7 +98,7 @@ class WatchReleaseTests(unittest.TestCase):
             calls += 1
             if calls == 1:
                 raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", None, None)
-            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "analysis"}}]}).encode())
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": EMPTY_AI_REVIEW}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
                 patch.object(watch.urllib.request, "urlopen", side_effect=urlopen), \
@@ -91,7 +111,7 @@ class WatchReleaseTests(unittest.TestCase):
                 "diff",
             )
 
-        self.assertEqual(result, "analysis")
+        self.assertIn("风险级别：P3", result)
         self.assertEqual(calls, 2)
         sleep.assert_called_once_with(5)
 
@@ -152,7 +172,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             captured.append(json.loads(request.data.decode("utf-8")))
-            content = "analysis" if len(captured) == 4 else f"Chunk finding {len(captured)}"
+            content = EMPTY_AI_REVIEW if len(captured) == 4 else f"Chunk finding {len(captured)}"
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
@@ -161,7 +181,7 @@ class WatchReleaseTests(unittest.TestCase):
                 {"api_url": "https://ai.example/v1", "model": "test", "diff_chunk_chars": 4},
                 "owner/repo", {"tag_name": "v1", "body": "release notes"}, "v0", "abcdefghij",
             )
-        self.assertEqual(result, "analysis")
+        self.assertIn("风险级别：P3", result)
         self.assertEqual(len(captured), 4)
         chunk_materials = [request["messages"][1]["content"] for request in captured[:3]]
         self.assertIn("Diff chunk: 1/3", chunk_materials[0])
@@ -243,7 +263,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             captured.append(json.loads(request.data.decode("utf-8")))
-            return io.BytesIO(json.dumps({"choices": [{"message": {"content": "analysis"}}]}).encode())
+            return io.BytesIO(json.dumps({"choices": [{"message": {"content": EMPTY_AI_REVIEW}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
                 patch.object(watch.urllib.request, "urlopen", side_effect=urlopen):
@@ -252,7 +272,7 @@ class WatchReleaseTests(unittest.TestCase):
                 {"tag_name": "v1", "body": "notes"}, "v0", "diff --git a/a b/a\n+++ b/a\n+change\n", "fast",
             )
 
-        self.assertEqual(result, "analysis")
+        self.assertIn("风险级别：P3", result)
         self.assertEqual(len(captured), 1)
         self.assertIn("FAST PRECHECK", captured[0]["messages"][1]["content"])
 
@@ -263,7 +283,7 @@ class WatchReleaseTests(unittest.TestCase):
             {"repo": "owner/repo", "release": {"tag_name": "v2", "body": "second"}, "previous_tag": "v1", "diff": "diff b", "target_network": "mainnet"},
         ]
         ids = [watch.fast_batch_id(item["repo"], item["release"], item["previous_tag"]) for item in candidates]
-        response = f"--- REVIEW {ids[0]} ---\nfirst analysis\n--- REVIEW {ids[1]} ---\nsecond analysis"
+        response = f"--- REVIEW {ids[0]} ---\n{EMPTY_AI_REVIEW}\n--- REVIEW {ids[1]} ---\n{EMPTY_AI_REVIEW}"
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
                 patch.object(watch.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps({
@@ -271,14 +291,14 @@ class WatchReleaseTests(unittest.TestCase):
                 }).encode())):
             analyses = watch.ask_ai_fast_batch(settings, candidates)
 
-        self.assertEqual(analyses, {ids[0]: "first analysis", ids[1]: "second analysis"})
+        self.assertTrue(all("风险级别：P3" in item for item in analyses.values()))
 
     def test_fast_batch_rejects_missing_or_duplicate_results(self):
-        self.assertIsNone(watch.parse_fast_batch_response("--- REVIEW 0000000000000000 ---\nanalysis", {
+        self.assertIsNone(watch.parse_fast_batch_response(f"--- REVIEW 0000000000000000 ---\n{EMPTY_AI_REVIEW}", {
             "0000000000000000", "1111111111111111",
         }))
         self.assertIsNone(watch.parse_fast_batch_response(
-            "--- REVIEW 0000000000000000 ---\na\n--- REVIEW 0000000000000000 ---\nb",
+            f"--- REVIEW 0000000000000000 ---\n{EMPTY_AI_REVIEW}\n--- REVIEW 0000000000000000 ---\n{EMPTY_AI_REVIEW}",
             {"0000000000000000"},
         ))
 
@@ -301,7 +321,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             calls.append(json.loads(request.data.decode("utf-8")))
-            content = f"response {len(calls)}"
+            content = EMPTY_AI_REVIEW
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         settings = {"api_url": "https://ai.example/v1", "model": "test", "diff_chunk_chars": 4}
@@ -310,8 +330,8 @@ class WatchReleaseTests(unittest.TestCase):
             first = watch.ask_ai(settings, "owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", "abcdefghij")
             second = watch.ask_ai(settings, "owner/repo", {"tag_name": "v1", "body": "notes"}, "v0", "abcdefghij")
 
-        self.assertEqual(first, "response 4")
-        self.assertEqual(second, "response 5")
+        self.assertIn("风险级别：P3", first)
+        self.assertIn("风险级别：P3", second)
         self.assertEqual(len(calls), 5)
 
     def test_highlight_summary_marks_major_changes(self):
