@@ -109,14 +109,14 @@ EVIDENCE GATES
 Compare the exact start tag with the target. Every code finding must name the exact changed file path in backticks, describe the target-specific behavior delta, and trace its effect through actual callers. A code-based alert is valid only if its cited path appears in the compared diff or in verified historical/reference evidence and the behavior remains present in the target tag. If the behavior existed at baseline, the input/workflow is unsupported, or causality is unproven, do not report a target-release regression or infer a broad outage or mandatory action. A PR/commit patch is evidence only if merged and included in the target tag; if it was already present at baseline, call it pre-existing. Issue closure, issue text, PR title or PR description alone are not code evidence. Historical findings may confirm a cumulative Release Notes claim only when they concern the same release series and the cited behavior remains in the target; label them as previously reviewed, not newly introduced in this release. In a cumulative stable-to-stable review, if the exact prerelease that introduced a change cannot be proven, say it is included in the target and that its first release is unknown. If chunk-review summaries are supplied, consolidate them without adding unsupported details.
 
 SCOPE AND SEVERITY
-Report only material effects on miners, node operators, consensus, compatibility, security, memory, stability or data integrity. Omit routine refactors, formatting, documentation, ordinary dependency updates, test-only changes, and minor fixes or optimizations. Assign each root cause to its most specific category; use multiple categories only for separately proven consequences. Base risk on proven impact, not a filename, function name, category, semver label, or plausible worst case. For a repair, rate the severity of the proven baseline defect operators face until upgrading, even though the target fixes it. Set the release risk to the highest severity among material, evidence-backed findings; do not average severities or raise code risk from an unverified note.
+Report material effects on miners and node operators, but separate evidence from importance: “已确认” means the evidence supports the behavior, not that it is urgent or applies to every operator. State narrow preconditions (such as archive-node state, bundled Tor, platform, or network) in the finding. Do not generalize a rare or conditional edge case to all mainnet nodes, and do not treat an unknown deployment mode as affected. Keep bounded, mode-specific findings in the report when useful, but rate them by their demonstrated scope and operational consequence. Omit routine refactors, formatting, documentation, ordinary dependency updates, test-only changes, and minor fixes or optimizations. Assign each root cause to its most specific category; use multiple categories only for separately proven consequences. Base risk on proven impact, not a filename, function name, category, semver label, or plausible worst case. For a repair, rate the severity of the proven baseline defect operators face until upgrading, even though the target fixes it. Set the release risk to the highest severity among material, evidence-backed findings; do not average severities or raise code risk from an unverified note.
 
 Use these risk levels consistently:
 - P0: immediate emergency, such as an imminent/active chain split, active critical exploit, likely major fund/data loss, or widespread node/mining outage.
-- P1: a confirmed severe issue requiring prompt operator action, including an exploitable security flaw, a realistic severe memory leak/OOM, material data corruption, or a consensus/compatibility change that breaks a supported production path. A release that fixes such a baseline defect may still be P1.
+- P1: a confirmed severe issue requiring prompt operator action, including an exploitable security flaw, a realistic severe memory leak/OOM, material data corruption, a crash-loop that prevents a supported production build from staying online, or a consensus/compatibility change that breaks a normal supported production path or risks a network split. A rare state-dependent edge case affecting only a specific node mode is not P1 unless that mode is the configured target or the consequence is severe for operators using it. A release that fixes such a baseline defect may still be P1.
 - P2: a real but bounded impact that does not require urgent action; P3: minor impact or no separately reportable material issue.
 Use 待人工复核 when evidence is incomplete; do not use P0/P1 as a substitute for uncertainty. A severe memory leak or OOM (including material memory leaks), or a security repair or risk, must have direct code evidence and a real supported path; generic hardening, small allocation reductions and low-impact fixes are not severe.
-Order findings by operator impact. Put confirmed node startup/crash-loop failures, miner operation failures, old/new node disagreement on whether the same target-network block is valid, and required resync/data-recovery actions before routine fixes. State the affected platform, node mode, network or database state, the concrete before/after behavior, and the operator action when evidence supports them. Do not bury these impacts under a generic “stability fix” or “security fix” label. A dependency or bundled-library update is material when it directly fixes such a proven runtime failure; do not dismiss it as an ordinary dependency bump.
+Order findings by operator impact. Put confirmed node startup/crash-loop failures, miner operation failures, old/new node disagreement on whether the same target-network block is valid, and required resync/data-recovery actions before routine fixes. State the affected platform, node mode, network or database state, the concrete before/after behavior, and the operator action when evidence supports them. Do not bury these impacts under a generic “stability fix” or “security fix” label. A dependency or bundled-library update is material when it directly fixes such a proven runtime failure; do not dismiss it as an ordinary dependency bump. Preserve scope in the wording: for example, a bundled Tor crash-loop is important for builds using bundled Tor, while an archive-only block-validation edge case is not a general mainnet upgrade emergency when the monitored node mode is unknown.
 
 BREAKING CHANGES
 An actual Release Notes section headed “⚠️ Breaking Changes”, “Breaking Changes” or “Breaking Notes” confirms only that the upstream used that heading; the heading alone does not establish a concrete impact and never triggers a notification. For a specific release-note claim, quote one exact sentence or concise excerpt from inside that section as `发行说明原文：「…」`; only a concrete behavior change or operator consequence that applies to the configured target network qualifies for the pending Breaking Changes notification exception. Code impact may remain pending, but do not infer consequences beyond the quoted text. Use those English labels only if the exact heading appears in supplied Release Notes. Without such a heading, mark code-confirmed 破坏性变更 only if a documented or otherwise supported upgrade, migration, recovery, operation or client/API workflow worked at the start tag and is broken by the target change with a material consequence on the configured target network. State the supported path, old/new behavior and consequence. Unsupported/obsolete read-only tools, unsupported inputs, optional formats, unsupported downgrades and effects limited to networks the operator does not use do not qualify. If support or impact is unclear, leave 破坏性变更=无; use 兼容性=待验证 only when Release Notes explicitly claim a material effect on a supported operator or recovery/interoperability path.
@@ -125,17 +125,23 @@ COMPATIBILITY
 Use 兼容性 only for a material interoperability regression in a supported client, RPC/API, node protocol, serialized format or configuration workflow. Prove the target-specific behavior change and state the supported scenario plus its start-tag and target-tag outcomes. Support must be evidenced by an in-repo caller or an official document/protocol/API contract or release note that identifies the workflow as supported; a method or field definition alone, a PR/Issue description, or a hypothetical external custom client is insufficient. No in-repo callers means no in-repo impact was found; it does not prove external users do not exist, but do not invent supported external use. A field retained on the wire but ignored is a behavior change; classify it as compatibility only if a supported caller or contract relies on that behavior. Do not mark an unknown external-use possibility as 已确认 or 待验证. Use 待验证 only when Release Notes explicitly claim material impact on a supported interoperability path but supplied code cannot resolve it. Distinguish interface interoperability from a broken operator upgrade/migration/recovery workflow; classify the same consequence under only its most specific category.
 
 CONSENSUS AND HARD FORKS
-Mark 共识变更 only if code proves that the set of fully valid blocks/transactions or blocks that can be committed to the configured target network changes. This includes a proven case where the same target-network block is accepted by one supported node version and rejected by another; state the exact old/new outcomes and the affected node state (for example, retained versus pruned history). Judge final validity, not intermediate header acceptance: an early check that rejects data already rejected by full validation is not a consensus change. Sync, storage, bad_blocks bookkeeping, peer bans and error-path changes are not consensus changes when the valid-block set is unchanged. A code-confirmed change to that valid set on the configured target network is a high-priority notification. If supplied evidence explicitly limits the change to another network and says the target is unaffected, do not mark a target-network consensus change or recommend an upgrade for it. Respect an in-tag merged PR that says consensus rules are unchanged unless target code directly contradicts it. A version-dependent validation difference is important, but does not by itself mean the release declares a hard fork. Call it a hard fork only when Release Notes or code explicitly state a network fork, activation height, coordinated network upgrade, or that old nodes will fork off the target network. A stated activation height or explicit upgrade deadline with a requirement to upgrade or warning that old nodes will fork off is an urgent alert only when it applies to the configured target network; put it first and quote the exact condition even if code impact remains unverified. If no hard fork is declared for the target network, say “发行说明未声明硬分叉”.
+Mark 共识变更 only if code proves that the set of fully valid blocks/transactions or blocks that can be committed to the configured target network changes. This includes a proven case where the same target-network block is accepted by one supported node version and rejected by another; state the exact old/new outcomes and the affected node state (for example, retained versus pruned history). Judge final validity, not intermediate header acceptance: an early check that rejects data already rejected by full validation is not a consensus change. Sync, storage, bad_blocks bookkeeping, peer bans and error-path changes are not consensus changes when the valid-block set is unchanged. A bounded, state-dependent validation difference may be recorded as a confirmed consensus/validation finding, but it is not automatically a major change, mandatory upgrade, or notification; reserve those conclusions for a demonstrated production-wide consequence, a normal supported target-node path that is broken, or an explicit network upgrade requirement. If supplied evidence explicitly limits the change to another network and says the target is unaffected, do not mark a target-network consensus change or recommend an upgrade for it. Respect an in-tag merged PR that says consensus rules are unchanged unless target code directly contradicts it. A version-dependent validation difference does not by itself mean the release declares a hard fork. Call it a hard fork only when Release Notes or code explicitly state a network fork, activation height, coordinated network upgrade, or that old nodes will fork off the target network. A stated activation height or explicit upgrade deadline with a requirement to upgrade or warning that old nodes will fork off is an urgent alert only when it applies to the configured target network; put it first and quote the exact condition even if code impact remains unverified. If no hard fork is declared for the target network, say “发行说明未声明硬分叉”.
+For every suspected consensus difference, trace all mandatory validation stages on both tags. If a later validator already rejects the same body on the baseline tag, an earlier check moving or changing its error is not a consensus change. Do not claim that existing mainnet blocks diverge without a concrete historical block or verified old/new results for the complete block path. If only a newly constructed malformed transaction/block shape would differ and upstream evidence says that shape is absent from mainnet history, describe that exact future condition and say historical mainnet impact is not demonstrated; do not present it as an observed chain split. Keep protocol-rule tightening distinct from a declared hard fork.
 
 MEMORY, SECURITY AND DATA
 Mark 内存问题 only for a proven material leak/unbounded growth or exhaustion that can realistically cause node degradation, stalls or OOM under a supported workload; a target fix for a severe baseline issue remains 内存问题=修复 and is a notification trigger. Mark 安全 only for a demonstrated exploitable vulnerability or material exposure (for example key leakage, auth bypass or remote compromise); a code-confirmed fix for a severe baseline vulnerability remains a notification trigger. Mark 稳定性/数据 only for a proven material crash, corruption, loss or unrecoverable recovery/reset consequence. A release-note-backed crash loop caused by an incompatible bundled runtime/library is a material stability repair; state whether it affects bundled or external components and which platforms/builds use it. Generic hardening and minor optimizations do not qualify.
+For peer-triggered denial of service, identify the untrusted input, whether an ordinary supported peer/sync path reaches it, the bounded or unbounded work/resource use, and the resulting node impact. A realistic remote path to OOM during a supported sync is a P1 security/resource-exhaustion repair even when limited to a sync mode; keep the mode in the wording rather than downgrading it as a generic edge case. State CPU exhaustion only when the code evidence separately shows the expensive CPU work and its attacker-controlled bound; do not infer CPU DoS from memory growth alone. Avoid duplicate Security and Memory labels for one resource-exhaustion cause unless they have independently proven consequences.
 
 TARGET NETWORK AND CONFIGURATION
 When `Operator target network` is supplied, judge risk, upgrade advice and notification relevance for that network. Distinguish mainnet from test/local networks and name the affected networks; a confirmed change on another network is not a major issue for the configured target when evidence says the target is unaffected. Do not assume every network enables the same consensus rules or features. If no target network is supplied, state the known scope without assuming mainnet impact.
 For config validation changes, compare new bounds with compiled defaults, shipped presets and documented supported values. A parser newly rejecting out-of-range values is not automatically a compatibility break. If omitted settings use defaults that remain within bounds, say defaults remain valid. Mark a material config compatibility issue only when a previously supported setting is now rejected or the supplied operator configuration is known to use a rejected value. If actual operator overrides are unknown, describe the failure conditionally and do not claim the monitored node is affected or notify on that basis alone.
+For diagnostic or repair commands, distinguish a manually invoked check/autocorrect workflow from normal node operation. State the command/mode and required database state. A false-positive rewind of a locally resyncable chain that requires an operator to run autocorrect is a bounded operational risk by default, not evidence of ordinary runtime corruption or lost funds; raise it to P1 only if the code proves likely unrecoverable data loss or the workflow runs automatically in the configured production path.
 
 UNCERTAINTY
 “无” means no explicit claim or evidence in supplied material, not proof that omitted code has no issue. Use 待验证 only for an explicit, material Release Notes claim that current diff and verified in-tag historical/PR/commit code cannot resolve. Quote the exact claim briefly and state the missing code evidence; never turn suspicion, an unverified PR description, a heading alone, or a minor note into a notification-worthy claim. For code-backed 已确认/修复/风险, cite the exact changed file path and behavior. For a concrete pending Breaking Changes claim, put the exact excerpt in its existing 重点标记依据 reason as `发行说明原文：「…」`; do not add a separate notification field. Identify historical findings as previously reviewed and patches by PR number or commit SHA.
+
+NOTIFICATION THRESHOLD
+Notification priority is separate from report inclusion and from “已确认” status. Do not trigger a high-priority notification solely because any category is non-无 or code-confirmed. Notify for an explicit target-network hard fork with an upgrade requirement, a concrete material Breaking Changes claim that applies to the configured target, or a code-evidenced P0/P1 issue with a verified changed path. Keep bounded P2/P3 fixes and conditional findings in the complete report with their scope, but do not give them urgent wording or trigger a notification. A severe bundled-runtime crash loop such as the affected bundled-Tor builds remains a notification-worthy stability repair; do not dilute it among unrelated routine fixes.
 
 OUTPUT
 For a prerelease, do not recommend direct production deployment; operational advice is generated separately. Before findings, output exactly these fields in Chinese:
@@ -1317,7 +1323,7 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
         advice = "必须升级"
         code_state = "代码差异已确认相关共识变化" if statuses.get("硬分叉/共识") == "已确认" else "硬分叉代码影响仍待核实"
         reason = f"🚨 发行说明明确要求在{activation}前升级。{code_state}；立即核对当前网络激活条件和节点版本并安排升级。"
-    elif statuses.get("硬分叉/共识") == "已确认":
+    elif statuses.get("硬分叉/共识") == "已确认" and risk == "P1":
         advice = "必须升级"
         if explicit_hard_fork:
             reason = f"🚨 发行说明声明硬分叉在{activation}生效，代码差异已确认相关共识变化；立即核对升级期限并安排升级。"
@@ -1364,7 +1370,7 @@ def highlight_summary(analysis: str, release: dict | None = None) -> str:
     values = dict(re.findall(r"(破坏性变更|硬分叉/共识|兼容性|内存问题|安全|稳定性/数据)\s*=\s*(无|已确认|待验证|修复|风险)", line.group(1)))
     if set(values) != set(HIGHLIGHT_FIELDS) or any(value not in HIGHLIGHT_FIELDS[key] for key, value in values.items()):
         return " · ".join(filter(None, [hard_fork_alert, "未提取到有效重点标记（请查看 AI 审查正文）"]))
-    icons = {"已确认": "🚨", "修复": "✅", "风险": "🚨"}
+    icons = {"已确认": "🔎", "修复": "✅", "风险": "🚨"}
     reason_line = re.search(r"(?m)^重点标记依据[：:]\s*(.*)$", analysis)
     reasons = dict(re.findall(
         r"(破坏性变更|硬分叉/共识|兼容性|内存问题|安全|稳定性/数据)\s*[=：]\s*([^；;]*)",
@@ -1393,14 +1399,15 @@ def highlight_summary(analysis: str, release: dict | None = None) -> str:
             pending.append("内存相关声明" if name == "内存问题" else ("共识/硬分叉声明" if name == "硬分叉/共识" else f"{name}声明"))
             continue
         if name == "破坏性变更" and explicit_breaking:
-            labels.append(f"{icons[status]} **Breaking Changes（代码影响已确认）**")
+            labels.append("🚨 **Breaking Changes（代码影响已确认）**")
             continue
         if name == "硬分叉/共识":
             if explicit_hard_fork and requires_upgrade:
                 code_state = "代码差异已确认相关共识变化" if status == "已确认" else "代码影响待核实"
                 hard_fork_alert = f"🚨🚨 **硬分叉激活提醒：{activation}；发行说明要求升级；{code_state}**"
                 continue
-            label = f"{icons[status]} **{'硬分叉' if confirmed_hard_fork else '重大共识变更'}**（{status}）"
+            label_text = "硬分叉" if confirmed_hard_fork else "共识/区块有效性差异"
+            label = f"{icons[status]} **{label_text}**（{status}）"
             detail = display_highlight_reason(reasons.get(name, ""))
             labels.append(f"{label}：{detail}" if detail else label)
             continue
@@ -1453,7 +1460,8 @@ def highlight_reason_summary(analysis: str) -> str:
 
 
 def importance(risk: str, highlights: str) -> str:
-    return "不重要" if risk == "P3" and highlights == "无" else "需关注"
+    urgent_declaration = "Breaking Changes" in highlights or "硬分叉紧急提醒" in highlights
+    return "不重要" if risk == "P3" and not urgent_declaration else "需关注"
 
 
 def conclusion(risk: str, highlights: str) -> str:
@@ -1461,13 +1469,13 @@ def conclusion(risk: str, highlights: str) -> str:
         return "严重风险"
     if "Breaking Changes" in highlights:
         return "重点关注"
-    if "重大共识变更" in highlights or "硬分叉" in highlights:
+    if "硬分叉紧急提醒" in highlights or "**硬分叉**" in highlights:
         return "重点关注"
     if risk == "P1":
         return "重点关注"
     if risk == "P2":
         return "需关注"
-    if risk == "P3" and highlights == "无":
+    if risk == "P3":
         return "不重要"
     return "待人工复核" if risk in {"待人工复核", "未标注"} else "需关注"
 
@@ -1518,22 +1526,22 @@ def issue_evidence(meta: dict) -> tuple[list[tuple[str, str]], list[tuple[str, s
                 priority_label = f"🚨🚨 硬分叉紧急提醒（{activation}，发行说明要求升级，{state}）"
             else:
                 detail = display_highlight_reason(reason)
-                if status == "已确认" and detail:
-                    priority_label = f"重大共识变更：{detail}"
+                if status == "已确认" and detail and meta.get("risk") in {"P0", "P1"}:
+                    priority_label = f"🚨 重大共识变更：{detail}"
                 else:
-                    priority_label = "硬分叉" if label == "硬分叉" else "重大共识变更"
+                    priority_label = "硬分叉" if label == "硬分叉" else ""
         elif category == "稳定性/数据" and status in {"修复", "风险"}:
             detail = display_highlight_reason(reason)
             kind = "修复" if status == "修复" else "风险"
-            priority_label = f"🚨 节点稳定性/数据{kind}：{detail}" if detail else f"🚨 节点稳定性/数据{kind}"
-        elif category == "兼容性" and status == "已确认":
+            priority_label = (f"🚨 节点稳定性/数据{kind}：{detail}" if detail else f"🚨 节点稳定性/数据{kind}") if meta.get("risk") in {"P0", "P1"} else ""
+        elif category == "兼容性" and status == "已确认" and meta.get("risk") in {"P0", "P1"}:
             detail = display_highlight_reason(reason)
             priority_label = f"🚨 版本兼容风险：{detail}" if detail else "🚨 版本兼容风险"
-        elif category == "安全" and status in {"修复", "风险"}:
+        elif category == "安全" and status in {"修复", "风险"} and meta.get("risk") in {"P0", "P1"}:
             detail = display_highlight_reason(reason)
             kind = "修复" if status == "修复" else "风险"
             priority_label = f"🔐 安全{kind}：{detail}" if detail else f"🔐 安全{kind}"
-        elif category == "内存问题" and status in {"修复", "风险"}:
+        elif category == "内存问题" and status in {"修复", "风险"} and meta.get("risk") in {"P0", "P1"}:
             detail = display_highlight_reason(reason)
             kind = "修复" if status == "修复" else "风险"
             priority_label = f"🚨 内存问题{kind}：{detail}" if detail else f"🚨 内存问题{kind}"
@@ -1888,20 +1896,9 @@ def release_requires_notification(meta: dict) -> bool:
         return True
     if meta.get("breaking_note_quote"):
         return True
-    verified_categories = set(meta.get("verified_code_categories", []))
-    if meta.get("risk") in {"P0", "P1"} and meta.get("verified_finding_paths"):
-        return True
-    statuses = meta.get("highlight_statuses", {})
-    if not isinstance(statuses, dict):
-        return False
-    return (
-        ("硬分叉/共识" in verified_categories and statuses.get("硬分叉/共识") == "已确认")
-        or ("破坏性变更" in verified_categories and statuses.get("破坏性变更") == "已确认")
-        or ("兼容性" in verified_categories and statuses.get("兼容性") == "已确认")
-        or ("内存问题" in verified_categories and statuses.get("内存问题") in {"修复", "风险"})
-        or ("安全" in verified_categories and statuses.get("安全") in {"修复", "风险"})
-        or ("稳定性/数据" in verified_categories and statuses.get("稳定性/数据") in {"修复", "风险"})
-    )
+    # Keep bounded confirmed findings in reports; only severe, evidence-backed
+    # findings and explicit operator upgrade declarations need an alert.
+    return meta.get("risk") in {"P0", "P1"} and bool(meta.get("verified_finding_paths"))
 
 
 def batch_digest(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> str:
@@ -1980,10 +1977,22 @@ def issue_body(
     if triggered:
         lines.extend(["", "**通知触发版本：**"])
         for coin, meta in triggered:
-            highlights = meta.get("highlights") or ""
-            if highlights == "无":
-                highlights = f"风险级别 {meta.get('risk', '需关注')}"
-            lines.append(f"- {coin} `{meta['tag']}`：{highlights}")
+            confirmed, pending, priority = issue_evidence(meta)
+            lines.extend(["", f"- **{coin} `{meta['tag']}`**", ""])
+            items = [
+                ("✅" if label.endswith("修复") else "🚨", f"已确认 — {label}", reason)
+                for label, reason in confirmed
+            ]
+            items.extend(("⚠️", f"待核实 — {label}", reason) for label, reason in pending)
+            if items:
+                lines.extend(
+                    f"  {number}. {icon} **{label}：** {reason}"
+                    for number, (icon, label, reason) in enumerate(items, 1)
+                )
+            elif priority:
+                lines.extend(f"  {number}. 🚨 {item}" for number, item in enumerate(priority, 1))
+            else:
+                lines.append(f"  1. 风险级别：{meta.get('risk', '需关注')}")
     for coin in sorted(entries):
         coin_releases = sorted(
             (entry for entry in releases if entry[0] == coin),
