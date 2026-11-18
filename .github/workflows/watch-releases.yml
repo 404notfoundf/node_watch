@@ -6,11 +6,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: watch-upstream-releases
+  # Keep skipped cron runs from replacing a pending review in completion mode.
+  group: ${{ github.event_name == 'schedule' && vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' && 'watch-upstream-releases-skipped-schedule' || 'watch-upstream-releases' }}
   cancel-in-progress: false
 
 jobs:
   watch:
+    if: ${{ github.event_name != 'schedule' || vars.RELEASE_POLL_COOLDOWN_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

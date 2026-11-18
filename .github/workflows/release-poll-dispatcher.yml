@@ -1,0 +1,38 @@
+name: 节点版本审查间隔调度
+
+on:
+  workflow_run:
+    workflows:
+      - 节点版本审查
+    types:
+      - completed
+
+permissions:
+  actions: write
+
+concurrency:
+  # Ignored completions must not cancel an active cooldown.
+  group: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == github.event.repository.default_branch && github.event.workflow_run.conclusion != 'cancelled' && 'release-poll-cooldown-active' || 'release-poll-cooldown-inactive' }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch-next:
+    if: ${{ vars.RELEASE_POLL_COOLDOWN_ENABLED == 'true' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == github.event.repository.default_branch && github.event.workflow_run.conclusion != 'cancelled' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: release-poll-cooldown
+      deployment: false
+    steps:
+      - name: Dispatch the next review after the cooldown
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          latest_dispatch_run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/watch-releases.yml/runs?per_page=100" \
+            | jq -r --arg branch "$DEFAULT_BRANCH" '[.workflow_runs[] | select(.event == "workflow_dispatch" and .head_branch == $branch)] | first | .id // empty')"
+          if [[ "$latest_dispatch_run_id" != "$SOURCE_RUN_ID" ]]; then
+            echo "A newer manual or dispatcher run exists; skipping this stale cooldown."
+            exit 0
+          fi
+          gh workflow run watch-releases.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"

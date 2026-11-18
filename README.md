@@ -33,7 +33,7 @@ AI 使用 OpenAI Chat Completions 兼容接口。`api_url` 可填写服务商的
 2. 按上文填写 `config/watch.yaml` 并添加 `AI_API_KEY` Secret。
 3. 在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。Pages 报告是公开网页。
 4. 在仓库 **Settings → Actions → General → Workflow permissions** 允许工作流 token 写入仓库内容；工作流会把历史网页保存在 `gh-pages` 分支，另外使用 `issues: write` 创建汇总 Issue、使用 Pages 部署权限发布网页。可设置 `NOTIFY_LOGINS` 指定通知用户；未设置时默认提及仓库所有者。
-5. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。之后工作流每 30 分钟轮询；每个新版本都会生成完整报告并发布网页、Artifact，同时为本轮更新创建一条汇总 Issue。只有达到上述重大事项条件时，Issue 才会 @通知接收人。所有已处理版本的去重键保存在 `gh-pages`，不会重复审查。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
+5. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。默认配置下工作流每 30 分钟尝试轮询一次；GitHub schedule 可能延迟或漏掉触发。每个新版本都会生成完整报告并发布网页、Artifact，同时为本轮更新创建一条汇总 Issue。只有达到上述重大事项条件时，Issue 才会 @通知接收人。所有已处理版本的去重键保存在 `gh-pages`，不会重复审查。GitHub Actions Artifact 最长保留 90 天；Pages 网页历史保留 180 天，并在下一次发布时清理过期报告。
 
 调整轮询频率时，编辑 [.github/workflows/watch-releases.yml](.github/workflows/watch-releases.yml) 中的 `schedule`。例如每 15 分钟运行一次：
 
@@ -45,6 +45,16 @@ on:
 ```
 
 将 `cron` 替换为想要的频率即可；保留一条 schedule，避免同时启用多个定时频率。默认使用 `7,37 * * * *`，每小时在第 7 分和第 37 分运行一次；北京时间对应 08:07、08:37、09:07、09:37 等，仍是每 30 分钟一次，并避开整点启动高峰。`*/30 * * * *` 表示每小时第 0 分和第 30 分运行，`0 * * * *` 表示每小时运行一次。GitHub Actions 的最短 schedule 间隔为 5 分钟；默认按 UTC 调度，运行也可能延迟。详见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule)。
+
+### 可选：上次运行结束后等待 30 分钟
+
+默认固定 cron 不是“上次运行结束后再等待 30 分钟”。如需试用完成后轮询模式，dispatcher 会在 GitHub Actions 中自动衔接，不需要本地电脑或外部服务。此模式默认关闭，原有轮询逻辑不变；每次主工作流结束仍会出现一条跳过 dispatcher job 的轻量运行记录，不会分配 runner 或启动审查：
+
+1. 在 **Settings → Environments** 创建 `release-poll-cooldown` 环境，只设置 **Wait timer: 30 minutes**，不要添加必需审核人。
+2. 在 **Settings → Secrets and variables → Actions → Variables** 新增 `RELEASE_POLL_COOLDOWN_ENABLED`，值设为 `true`。请先完成环境计时器，再启用这个变量。
+3. 打开 **Actions → 节点版本审查 → Run workflow** 手动启动一次。之后每轮完成后，dispatcher 等待 30 分钟再触发下一轮。
+
+启用后，固定 schedule 触发会被跳过，因此不会同时执行两套轮询；GitHub 仍可能显示这些被跳过的 schedule 记录，它们使用独立并发组，不会替换审查运行。dispatcher 只响应默认分支上的手动或自动 `workflow_dispatch` 运行，并会取消旧的冷却等待，以最新一轮完成时间重新计时。要恢复默认固定 cron，删除该变量或将值改为 `false`。等待时间不占用计费 runner 时间，但 dispatcher 会在 Actions 中显示为等待中的运行；后续事件和 runner 启动仍可能延迟。首次启用前必须配置环境计时器，否则 dispatcher 会立即继续运行。
 
 ## 在本地运行
 
