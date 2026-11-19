@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>节点版本审查报告 · 2026-11-19 10:21:33 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>节点版本审查报告</h1>
+<h2>检查批次 2026-11-19 10:21:33 UTC</h2>
+<h3>aleo</h3>
+<h4>v4.13.1 · 正式版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: aleo-labs-protocol/snarkOS --&gt;</p>
+<ul>
+<li><strong>优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：</strong> 无</li>
+<li><strong>处置建议：</strong> 建议升级 · 需关注</li>
+<li><strong>建议理由：</strong> 存在 P2 级变化或修复；先核对适用平台、节点模式及配置，受影响时再安排维护窗口，不属于强制升级要求。</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li><strong>已确认 — 稳定性/数据：</strong> 验证器模式新增升级监视器出块闸门：当委员会成员声明的共识排程领先、且本节点连接的验证者 stake 未构成 quorum 反驳时，该验证器在特定高度拒绝构建区块（区块同步仍推进）。触发依赖委员会成员声明与连接 stake 分布，属条件性可用性风险，非全网节点必然受影响。，代码路径：<code>node/bft/src/helpers/upgrade_monitor.rs</code>、<code>node/consensus/src/lib.rs</code> 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/upgrade_monitor.rs&quot;, &quot;quote&quot;: &quot;if is_claimed &amp;&amp; !self.is_refuted(&amp;state, committee, connected, Some(height)) {\n            return Err(BlockHeldBack(format!(\n                &quot;Validators may run a newer consensus version than this build at height {height}, and connected \\n                 validators holding a quorum of stake have not refuted it&quot;\n            ))\n            .into());\n        }&quot;} 代码证据：{&quot;path&quot;: &quot;node/consensus/src/lib.rs&quot;, &quot;quote&quot;: &quot;self.bft.primary().gateway().ensure_block_may_be_built(block_height)?;&quot;}</li>
+<li><strong>已确认 — 兼容性：</strong> <code>snarkos_consensus_unconfirmed_transactions_total</code> 与 <code>snarkos_consensus_unconfirmed_solutions_total</code> 由 gauge 改为 counter，会破坏把二者按 gauge 采集或告警的监控查询，需更新对应面板与 PromQL。，代码路径：<code>node/consensus/src/lib.rs</code>、<code>node/metrics/src/names.rs</code> 代码证据：{&quot;path&quot;: &quot;node/metrics/src/names.rs&quot;, &quot;quote&quot;: &quot;pub(super) const COUNTER_NAMES: [&amp;str; 7] = [\n    bft::LEADERS_ELECTED,\n    bft::PEER_PROPOSALS_MALFORMED,\n    consensus::STALE_UNCONFIRMED_TRANSACTIONS,\n    consensus::STALE_UNCONFIRMED_SOLUTIONS,\n    consensus::DROPPED_TRANSACTIONS,\n    consensus::UNCONFIRMED_SOLUTIONS,\n    consensus::UNCONFIRMED_TRANSACTIONS,\n];&quot;} 代码证据：{&quot;path&quot;: &quot;node/consensus/src/lib.rs&quot;, &quot;quote&quot;: &quot;metrics::increment_counter(metrics::consensus::UNCONFIRMED_SOLUTIONS);&quot;} 代码证据：{&quot;path&quot;: &quot;node/consensus/src/lib.rs&quot;, &quot;quote&quot;: &quot;                metrics::increment_gauge(metrics::consensus::UNCONFIRMED_SOLUTIONS, 1f64);&quot;}</li>
+<li><strong>已确认 — 兼容性：</strong> 网关握手与事件协议升至版本 12，握手在旧布局后追加 <code>HandshakeTrailer</code> 并新增共识排程与创世哈希校验，创世哈希不匹配的对端被断开；接受下限仍为 10，v4.12.x 与 v4.13.x 仍可双向互连。，代码路径：<code>node/bft/events/src/helpers/handshake.rs</code>、<code>node/bft/events/src/lib.rs</code>、<code>node/bft/src/gateway.rs</code> 代码证据：{&quot;path&quot;: &quot;node/bft/events/src/lib.rs&quot;, &quot;quote&quot;: &quot;    pub const MINIMUM_VERSION: u32 = 10;&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/events/src/lib.rs&quot;, &quot;quote&quot;: &quot;    pub const VERSION: u32 = 12;&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/events/src/helpers/handshake.rs&quot;, &quot;quote&quot;: &quot;        let signature = Data::read_le(&amp;mut reader)?;\n        let trailer = HandshakeTrailer::read_le(&amp;mut reader)?;\n\n        Ok(Self { info, signature, trailer })&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/gateway.rs&quot;, &quot;quote&quot;: &quot;        if info.version &gt;= HandshakeTrailer::FIRST_VERSION &amp;&amp; trailer.schedule.is_none() {\n            warn!(\n                &quot;{CONTEXT} Handshake with '{peer_addr}' failed (version {} sent no consensus schedule)&quot;,\n                info.version\n            );\n            return Some(DisconnectReason::ProtocolViolation);\n        }&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/gateway.rs&quot;, &quot;quote&quot;: &quot;        if let Some(genesis_hash) = &amp;trailer.genesis_hash\n            &amp;&amp; genesis_hash[..] != expected_genesis_hash[..]\n        {\n            warn!(&quot;{CONTEXT} Handshake with '{peer_addr}' failed (incorrect genesis hash)&quot;);\n            return Some(DisconnectReason::GenesisMismatch);\n        }&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/gateway.rs&quot;, &quot;quote&quot;: &quot;                if version &lt; Event::&lt;N&gt;::MINIMUM_VERSION {\n                    bail!(&quot;Dropping '{peer_ip}' on event version {version} (outdated)&quot;);\n                }&quot;}</li>
+<li><strong>已确认 — 兼容性：</strong> <code>snarkos developer</code> 的端点处理改变：带查询字符串的 URL 被拒绝，端点路径须以 API 版本（v1 或 v2）结尾，未标注版本的端点默认改走 v2。显式指定 /v1、/v2 的端点行为不变，仅影响使用该命令的脚本。，代码路径：<code>cli/src/commands/developer/mod.rs</code>、<code>cli/src/helpers/args.rs</code> 代码证据：{&quot;path&quot;: &quot;cli/src/helpers/args.rs&quot;, &quot;quote&quot;: &quot;pub(crate) fn prepare_endpoint(endpoint: Uri) -&gt; Result&lt;Uri&gt; {\n    ensure!(endpoint.query().is_none(), &quot;The endpoint URL must not have a query string&quot;);&quot;} 代码证据：{&quot;path&quot;: &quot;cli/src/helpers/args.rs&quot;, &quot;quote&quot;: &quot;pub(crate) fn api_version_of(path: &amp;str) -&gt; Option&lt;ApiVersion&gt; {\n    match path.trim_end_matches('/').rsplit('/').next() {\n        Some(API_VERSION_V1) =&gt; Some(ApiVersion::V1),\n        Some(API_VERSION_V2) =&gt; Some(ApiVersion::V2),\n        _ =&gt; None,\n    }\n}&quot;} 代码证据：{&quot;path&quot;: &quot;cli/src/commands/developer/mod.rs&quot;, &quot;quote&quot;: &quot;        let api_version = api_version_of(base_url.path())\n            .context(&quot;The endpoint URL must end in an API version (v1 or v2). Use <code>prepare_endpoint</code> first&quot;)?;&quot;}</li>
+<li><strong>已确认 — 安全：</strong> 依赖安全更新：tracing-subscriber 升至 0.3.23（RUSTSEC-2025-0055）、libz-sys 升至 1.1.33（RUSTSEC-2026-0544），并从依赖审计忽略清单移除对应条目。未显示漏洞在节点运行中的可利用路径，按低影响依赖修复处理。，代码路径：<code>Cargo.lock</code>、<code>Cargo.toml</code>、<code>deny.toml</code> 代码证据：{&quot;path&quot;: &quot;Cargo.toml&quot;, &quot;quote&quot;: &quot;[workspace.dependencies.tracing-subscriber]\nversion = &quot;0.3.23&quot;&quot;} 代码证据：{&quot;path&quot;: &quot;Cargo.lock&quot;, &quot;quote&quot;: &quot;[[package]]\nname = &quot;tracing-subscriber&quot;\nversion = &quot;0.3.23&quot;&quot;} 代码证据：{&quot;path&quot;: &quot;Cargo.lock&quot;, &quot;quote&quot;: &quot;[[package]]\nname = &quot;libz-sys&quot;\nversion = &quot;1.1.33&quot;&quot;} 代码证据：{&quot;path&quot;: &quot;deny.toml&quot;, &quot;quote&quot;: &quot;  &quot;RUSTSEC-2025-0055&quot;,&quot;}</li>
+</ol>
+<h5>版本信息</h5>
+<p>发布于 2026-11-17T16:31:34Z · 比较 <code>v4.12.1</code> → <code>v4.13.1</code> · <a href="https://github.com/aleo-labs-protocol/snarkOS/releases/tag/v4.13.1">打开 Release</a></p>
+<h3>alephium</h3>
+<h4>v4.7.2 · 正式版 · 完整审查</h4>
+<p>&lt;!-- watch-repo: alephium/alephium --&gt;</p>
+<ul>
+<li><strong>优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：</strong> 无</li>
+<li><strong>处置建议：</strong> 建议升级 · 需关注</li>
+<li><strong>建议理由：</strong> 上游明确建议运营者升级，建议尽快安排维护窗口并核对适用条件；该声明不等同于已确认的重大代码风险。 上游升级建议，发行说明原文：「Fixed a mempool cache issue, highly recommended for mining pools and node operators.」</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li><strong>已确认 — 稳定性/数据：</strong> 修复 mempool 依赖图去重缺陷：<code>flow/src/main/scala/org/alephium/flow/mempool/KeyedFlow.scala</code> 的 removeNodeAndAncestors 旧实现按节点递归父边，重复父边/重叠祖先路径下同一祖先被多次 sideEffect，现按 key 去重移除，测试覆盖两种图形态且断言每祖先仅移除一次；影响限于依赖图含重复边的 mempool 清理路径。，代码路径：<code>flow/src/test/scala/org/alephium/flow/mempool/KeyedFlowSpec.scala</code> 代码证据：{&quot;path&quot;: &quot;flow/src/main/scala/org/alephium/flow/mempool/KeyedFlow.scala&quot;, &quot;quote&quot;: &quot;  def removeNodeAndAncestors(node: N, sideEffect: N =&gt; Unit): Unit = {\n    removeNodeFromGraph(node)\n    sideEffect(node)\n    node.getParents().foreach(_.foreach(parent =&gt; removeNodeAndAncestors(parent.key, sideEffect)))\n  }&quot;} 代码证据：{&quot;path&quot;: &quot;flow/src/test/scala/org/alephium/flow/mempool/KeyedFlowSpec.scala&quot;, &quot;quote&quot;: &quot;    flow.addNewNode(flow.newNode(1, Seq(0, 0)))\n    var removed = Seq.empty[Int]\n\n    flow.removeNodeAndAncestors(1, node =&gt; removed = removed :+ node.value)\n\n    removed is Seq(1, 0)\n    flow.isEmpty is true\n    flow.checkSources()&quot;} 代码证据：{&quot;path&quot;: &quot;flow/src/test/scala/org/alephium/flow/mempool/KeyedFlowSpec.scala&quot;, &quot;quote&quot;: &quot;    flow.addNewNode(flow.newNode(2, Seq(1, 0)))\n    var removed = Seq.empty[Int]\n\n    flow.removeNodeAndAncestors(2, node =&gt; removed = removed :+ node.value)\n\n    removed is Seq(2, 1, 0)&quot;}</li>
+</ol>
+<h5>版本信息</h5>
+<p>发布于 2026-10-12T09:49:42Z · 比较 <code>v4.7.1</code> → <code>v4.7.2</code> · <a href="https://github.com/alephium/alephium/releases/tag/v4.7.2">打开 Release</a></p>
+<h4>v4.7.3 · 正式版 · 快速预检</h4>
+<p>&lt;!-- watch-repo: alephium/alephium --&gt;</p>
+<ul>
+<li><strong>优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：</strong> 无</li>
+<li><strong>处置建议：</strong> 可暂缓 · 不重要</li>
+<li><strong>建议理由：</strong> 未发现需要立即处理的重大变更。</li>
+</ul>
+<h5>AI 审查</h5>
+<p>未发现需要单独报告的重大变更。</p>
+<h5>版本信息</h5>
+<p>发布于 2026-10-21T08:48:37Z · 比较 <code>v4.7.2</code> → <code>v4.7.3</code> · <a href="https://github.com/alephium/alephium/releases/tag/v4.7.3">打开 Release</a></p>
+<hr>
+<p>审查范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整审查”标识为准。</p>
+</article></main></body></html>
