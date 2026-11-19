@@ -384,11 +384,9 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("one or two concise sentences", watch.SYSTEM_PROMPT)
         self.assertIn("minor fixes or optimizations", watch.SYSTEM_PROMPT)
         self.assertIn("发行说明未声明硬分叉", watch.SYSTEM_PROMPT)
-        self.assertIn("代码已确认的发现", watch.SYSTEM_PROMPT)
-        self.assertIn("待核实的发行说明主张", watch.SYSTEM_PROMPT)
-        self.assertIn("never combine different categories into one item", watch.SYSTEM_PROMPT)
-        self.assertIn("omit categories marked 无", watch.SYSTEM_PROMPT)
-        self.assertIn("Do not repeat the release tag as a heading", watch.SYSTEM_PROMPT)
+        self.assertIn("supplied JSON output schema", watch.SYSTEM_PROMPT)
+        self.assertIn("the program generates report formatting, numbering", watch.SYSTEM_PROMPT)
+        self.assertIn("return empty finding arrays rather than a prose report", watch.SYSTEM_PROMPT)
         hard_fork = analysis.replace(
             "硬分叉/共识=P1：src/consensus.rs 修改了区块验证规则",
             "硬分叉/共识=P1：硬分叉：激活高度 123 会使旧节点拒绝新区块",
@@ -850,7 +848,7 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertNotIn("<!-- watch-release:", report)
                 self.assertEqual(report.count("- **优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：** 无"), 3)
                 self.assertEqual(report.count("1. Finding for v"), 3)
-                self.assertIn("one continuous numbering sequence across both sections", watch.SYSTEM_PROMPT)
+                self.assertIn("the program generates report formatting, numbering", watch.SYSTEM_PROMPT)
                 self.assertEqual(watch.reported_releases(), {
                     ("A 币种", "a/node", "v1"),
                     ("A 币种", "a/node", "v2"),
