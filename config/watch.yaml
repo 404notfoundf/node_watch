@@ -20,7 +20,7 @@ ai:
 # auto：预发布版和正式版统一按风险信号选择审查模式。
 review:
   mode: auto
-  max_releases_per_run: 3 # 每轮最多审查的新 Release 数；剩余版本在下一轮继续。
+  max_releases_per_run: 4 # 每轮最多审查的新 Release 数；剩余版本在下一轮继续。
 
 # 每个币种配置一个仓库。running_version 表示矿池当前运行的 GitHub Release；只分析之后的新版本。
 # coins:
