@@ -354,7 +354,7 @@ class ReviewRegressionTests(unittest.TestCase):
     def test_invalid_cached_chunk_is_replaced_not_reused(self):
         def response(settings, prompt, material):
             review_id = prompt.split('review_id must be "')[1].split('"')[0]
-            return json.dumps({"review_id": review_id, "complete": True, "analysis": "No material findings"})
+            return json.dumps({"review_id": review_id, "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW)})
         with patch.object(watch, "cached_chunk_review", return_value="old unvalidated prose"), \
                 patch.object(watch, "call_ai", side_effect=response) as request, \
                 patch.object(watch, "save_chunk_review") as save, \

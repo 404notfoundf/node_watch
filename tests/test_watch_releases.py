@@ -191,7 +191,7 @@ class WatchReleaseTests(unittest.TestCase):
         def urlopen(request, timeout):
             captured.append(json.loads(request.data.decode("utf-8")))
             review_id = re.search(r'review_id must be "([0-9a-f]+)"', captured[-1]["messages"][0]["content"])
-            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": f"Chunk finding {len(captured)}"})
+            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW)})
                        if review_id else EMPTY_AI_REVIEW)
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
@@ -211,9 +211,9 @@ class WatchReleaseTests(unittest.TestCase):
         summary_material = captured[3]["messages"][1]["content"]
         self.assertIn("all 10 characters were reviewed in 3 chunks", summary_material)
         self.assertIn("release notes", summary_material)
-        self.assertIn("Chunk finding 1", summary_material)
-        self.assertIn("Chunk finding 2", summary_material)
-        self.assertIn("Chunk finding 3", summary_material)
+        self.assertIn("## Chunk 1/3", summary_material)
+        self.assertIn("## Chunk 2/3", summary_material)
+        self.assertIn("## Chunk 3/3", summary_material)
 
     def test_ai_rejects_invalid_diff_chunk_size(self):
         with self.assertRaises(watch.AIReviewError):
@@ -342,7 +342,7 @@ class WatchReleaseTests(unittest.TestCase):
         def urlopen(request, timeout):
             calls.append(json.loads(request.data.decode("utf-8")))
             review_id = re.search(r'review_id must be "([0-9a-f]+)"', calls[-1]["messages"][0]["content"])
-            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": "No material finding"})
+            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW)})
                        if review_id else EMPTY_AI_REVIEW)
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 

@@ -6,12 +6,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from test_watch_releases import watch
+from test_watch_releases import EMPTY_AI_REVIEW, watch
 
 
 def completed_response(prompt):
     review_id = prompt.split('review_id must be "')[1].split('"')[0]
-    return json.dumps({"review_id": review_id, "complete": True, "analysis": 'Checked "quoted" code.\nNo material findings.'})
+    return json.dumps({"review_id": review_id, "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW)})
 
 
 class ChunkResponseTests(unittest.TestCase):
@@ -27,14 +27,14 @@ class ChunkResponseTests(unittest.TestCase):
         return watch.ask_ai({}, "aleo-labs-protocol/snarkOS", {"tag_name": "v4.13.1"}, "v4.12.1", "diff")
 
     def test_complete_json_fences_are_accepted(self):
-        analysis = 'Checked "quoted" code.\nNo material findings.'
+        analysis = json.loads(EMPTY_AI_REVIEW)
         response = json.dumps({"review_id": "expected", "complete": True, "analysis": analysis})
         for wrapped in (response, "```json\n" + response + "\n```", "```\n" + response + "\n```", " \n```JSON\r\n" + response + "\r\n```\n "):
             with self.subTest(wrapped=wrapped):
                 self.assertEqual(watch.validate_chunk_review(wrapped, "expected"), analysis)
 
     def test_prose_multiple_objects_and_truncated_output_remain_rejected(self):
-        response = json.dumps({"review_id": "expected", "complete": True, "analysis": "done"})
+        response = json.dumps({"review_id": "expected", "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW)})
         invalid = (
             "Here is the result:\n" + response,
             response + "\nExtra explanation.",
@@ -50,7 +50,7 @@ class ChunkResponseTests(unittest.TestCase):
 
     def test_fences_do_not_bypass_completion_or_schema_validation(self):
         for update in ({"review_id": "wrong"}, {"complete": False}, {"complete": 1}, {"analysis": " "}, {"analysis": []}, {"extra": "field"}):
-            data = {"review_id": "expected", "complete": True, "analysis": "done", **update}
+            data = {"review_id": "expected", "complete": True, "analysis": json.loads(EMPTY_AI_REVIEW), **update}
             with self.subTest(update=update), self.assertRaises(watch.AIReviewError):
                 watch.validate_chunk_review("```json\n" + json.dumps(data) + "\n```", "expected")
 
