@@ -153,6 +153,7 @@ Mark 内存问题 only for a proven material leak/unbounded growth or exhaustion
 For peer-triggered denial of service, identify the untrusted input, whether an ordinary supported peer/sync path reaches it, the bounded or unbounded work/resource use, and the resulting node impact. A realistic remote path to OOM during a supported sync is a P1 security/resource-exhaustion repair even when limited to a sync mode; keep the mode in the wording rather than downgrading it as a generic edge case. State CPU exhaustion only when the code evidence separately shows the expensive CPU work and its attacker-controlled bound; do not infer CPU DoS from memory growth alone. Avoid duplicate Security and Memory labels for one resource-exhaustion cause unless they have independently proven consequences.
 
 PRIORITY CALIBRATION
+Compatibility changes in monitoring metrics or developer/client commands may require updating those consumers, not upgrading every node. Compare both handshake acceptance ranges before claiming peer incompatibility; increasing the advertised version alone is not proof. A new conditional validator/upgrade guard is not a current-network upgrade mandate: prove the configured network's activation requirement or actual supported old-node failure. When upstream explicitly states that versions remain interoperable or operators may upgrade at their convenience, reconcile that statement with code evidence instead of inferring a mandatory rollout from these changes.
 “已确认” describes evidence, not importance. The report's priority summary is reserved for P0/P1 findings, target-network hard-fork upgrade requirements, and concrete material Breaking Changes claims; P2/P3 findings may remain in the detailed findings but must not be written with urgent wording or promoted to the priority summary. Prefix each code-backed category reason with its category severity, exactly `P0：`, `P1：`, `P2：` or `P3：`; only P0/P1 category reasons belong in the priority summary. If a category has both a severe and a bounded finding, its reason must describe only the severe root cause and the bounded item must remain separate in detailed findings. For manual maintenance tools, prove the triggering command, affected state and recovery consequences; a bounded, resyncable local rewind is a P2 operator risk, not ordinary runtime corruption or a high-priority data-loss alert. For component startup failures, state only the build, platform, filesystem, path and configuration conditions established by this target's evidence, not conditions from another project's failure. Adding resource or peer-admission limits is not by itself a security fix: require evidence that the old supported remote path could cause material resource exhaustion or node unavailability; existing global caps, garbage collection or bounded work weigh against a severe classification. Bounded timeout or retry changes are not security or stability issues unless evidence shows a material operator-visible outage; do not describe bounded work as an indefinite hang.
 
 TARGET NETWORK AND CONFIGURATION
@@ -1714,16 +1715,6 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
         advice = "必须升级"
         code_state = "代码差异已确认相关共识变化" if statuses.get("硬分叉/共识") == "已确认" else "硬分叉代码影响仍待核实"
         reason = f"🚨 发行说明明确要求在{activation}前升级。{code_state}；立即核对当前网络激活条件和节点版本并安排升级。"
-    elif statuses.get("硬分叉/共识") == "已确认" and risk == "P1":
-        advice = "必须升级"
-        if explicit_hard_fork:
-            reason = f"🚨 发行说明声明硬分叉在{activation}生效，代码差异已确认相关共识变化；立即核对升级期限并安排升级。"
-        else:
-            reason = "已确认硬分叉或重大共识变更，应核对网络生效条件和节点兼容要求。"
-    elif statuses.get("破坏性变更") == "已确认" or statuses.get("兼容性") == "已确认":
-        advice, reason = "必须升级", "已确认破坏性或兼容性变更，需要升级并核对现有配置。"
-    elif statuses.get("安全") == "风险":
-        advice, reason = "必须升级", "发现已确认安全风险，应尽快升级。"
     elif "待验证" in statuses.values() or risk in {"待人工复核", "未标注"}:
         advice = "需人工确认"
         if explicit_hard_fork:
@@ -1731,10 +1722,14 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
             reason = f"🚨 发行说明明确声明硬分叉在{activation}生效，{deadline}；请立即核对当前节点版本和网络升级计划。代码影响仍待核实。"
         else:
             reason = "发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。"
-    elif risk in {"P1", "P2"} or any(statuses.get(name) in {"修复", "风险"} for name in ("内存问题", "安全", "稳定性/数据")):
-        advice, reason = "建议升级", "包含已确认的重要修复或风险，建议在维护窗口升级。"
+    elif risk == "P1":
+        advice, reason = "建议升级", "存在已确认的 P1 级重大影响，建议尽快核对当前节点的适用条件并安排处理；升级前核对配置及兼容性，不将条件性影响泛化为所有节点的强制升级要求。"
     elif recommendation:
         advice, reason = "建议升级", "上游明确建议运营者升级，建议尽快安排维护窗口并核对适用条件；该声明不等同于已确认的重大代码风险。"
+    elif risk == "P2":
+        advice, reason = "建议升级", "存在 P2 级变化或修复；先核对适用平台、节点模式及配置，受影响时再安排维护窗口，不属于强制升级要求。"
+    elif any(status != "无" for status in statuses.values()):
+        advice, reason = "可暂缓", "仅发现低影响变化或修复，不构成强制升级要求；可按实际需求安排更新，升级前核对相关配置及调用方式。"
     else:
         advice, reason = "可暂缓", "未发现需要立即处理的重大变更。"
 
@@ -1991,9 +1986,13 @@ def issue_action_line(meta: dict) -> str:
     if advice == "必须升级":
         return f"尽快核对升级条件并安排节点升级到 `{tag}`；部署完成后，将配置中的 `running_version` 更新为 `{tag}`。"
     if advice == "建议升级":
+        if meta.get("risk") == "P1":
+            return f"建议尽快核对当前节点的适用条件并安排处理或升级到 `{tag}`；升级前核对兼容性及配置，部署完成后再更新 `running_version`。"
+        if meta.get("risk") == "P2" and not meta.get("upstream_upgrade_quote"):
+            return f"先确认当前节点是否受影响；受影响时建议在维护窗口升级到 `{tag}`，否则可按需安排；部署完成后再更新 `running_version`。"
         return f"建议在维护窗口升级到 `{tag}`；部署完成后，将配置中的 `running_version` 更新为 `{tag}`。"
     if advice == "可暂缓":
-        return f"当前可暂缓升级到 `{tag}`；继续观察后续版本。"
+        return f"当前可暂缓升级到 `{tag}`；继续观察后续版本，后续升级前核对相关配置及调用方式。"
     return f"核对待确认声明的完整变更及其对当前网络的影响，再决定是否升级到 `{tag}`。"
 
 
@@ -2063,6 +2062,7 @@ def format_release(
         "highlights": highlights,
         "highlight_statuses": highlight_statuses(analysis),
         "highlight_reasons": highlight_reasons,
+        "highlight_category_reasons": category_reasons,
         "verified_code_categories": verified_code_categories,
         "verified_finding_paths": sorted(verified_finding_paths),
         "breaking_note_quote": breaking_note_quote(analysis, release),
@@ -2309,16 +2309,31 @@ def notification_entries(
     return selected
 
 
-def release_requires_notification(meta: dict) -> bool:
+def release_notification_reasons(meta: dict) -> list[str]:
+    reasons = []
     hard_fork = meta.get("hard_fork_notice")
     if hard_fork and hard_fork[1]:
-        return True
-    if meta.get("breaking_note_quote"):
-        return True
-    if meta.get("release_channel") == "正式版" and meta.get("upstream_upgrade_quote"):
-        return True
-    # Ordinary bounded findings still need severe, verified impact for a risk alert.
-    return meta.get("risk") in {"P0", "P1"} and bool(meta.get("verified_finding_paths"))
+        state = "代码差异确认共识变化" if meta.get("highlight_statuses", {}).get("硬分叉/共识") == "已确认" else "代码影响待核实"
+        reasons.append(f"🚨🚨 **目标网络硬分叉升级要求：** {hard_fork[0]}，发行说明明确要求升级；{state}。")
+    if quote := meta.get("breaking_note_quote"):
+        reasons.append(f"⚠️ **重大 Breaking Changes 声明：** 发行说明原文：「{quote}」（声明与代码影响分开判断）。")
+    if meta.get("risk") in {"P0", "P1"}:
+        verified_paths = set(meta.get("verified_finding_paths", []))
+        for category, reason in meta.get("highlight_category_reasons", {}).items():
+            severity = re.match(r"^(P[01])[：:]\s*", reason)
+            status = meta.get("highlight_statuses", {}).get(category)
+            if not severity or status not in {"已确认", "修复", "风险"} or not cited_file_paths(reason) & verified_paths:
+                continue
+            label = f"{category}{status if status in {'修复', '风险'} else ''}"
+            icon = "✅" if status == "修复" else "🚨"
+            reasons.append(f"{icon} **{severity.group(1)} 已确认 — {label}：** {display_highlight_reason(reason)}")
+    if meta.get("release_channel") == "正式版" and (quote := meta.get("upstream_upgrade_quote")):
+        reasons.append(f"🔔 **运营升级提醒（非紧急风险警报）：** 上游建议升级，发行说明原文：「{quote}」")
+    return reasons
+
+
+def release_requires_notification(meta: dict) -> bool:
+    return bool(release_notification_reasons(meta))
 
 
 def batch_digest(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> str:
@@ -2390,31 +2405,21 @@ def issue_body(
         ) + "。",
     ]
     triggered = [
-        (coin, meta)
+        (coin, meta, reasons)
         for coin, _repo, meta in releases
-        if release_requires_notification(meta)
+        if (reasons := release_notification_reasons(meta))
     ]
+    lines.extend(["", "**本轮处置概览（全部已完成版本）：**", "", "| 币种 | 版本 | 风险 | 处置结论 | 主动提醒条件 |", "| --- | --- | --- | --- | --- |"])
+    for coin, _repo, meta in releases:
+        cells = [coin, f"`{meta['tag']}`", meta.get("risk", "未标注"), meta.get("upgrade_advice", "需人工确认"), "达到" if release_requires_notification(meta) else "未达到"]
+        lines.append("| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ").replace("\r", " ") for cell in cells) + " |")
     if triggered:
         lines.extend(["", "**通知触发版本：**"])
-        for coin, meta in triggered:
-            confirmed, pending, priority = issue_evidence(meta)
-            lines.extend(["", f"- **{coin} `{meta['tag']}`**", ""])
-            items = [
-                ("✅" if label.endswith("修复") else "🚨", f"已确认 — {label}", reason)
-                for label, reason in confirmed
-            ]
-            items.extend(("⚠️", f"待核实 — {label}", reason) for label, reason in pending)
-            if meta.get("release_channel") == "正式版" and (quote := meta.get("upstream_upgrade_quote")):
-                items.append(("🔔", "运营升级提醒（非紧急风险警报）", f"上游建议升级，发行说明原文：「{quote}」"))
-            if items:
-                lines.extend(
-                    f"  {number}. {icon} **{label}：** {reason}"
-                    for number, (icon, label, reason) in enumerate(items, 1)
-                )
-            elif priority:
-                lines.extend(f"  {number}. 🚨 {item}" for number, item in enumerate(priority, 1))
-            else:
-                lines.append(f"  1. 风险级别：{meta.get('risk', '需关注')}")
+        for coin, meta, reasons in triggered:
+            lines.extend(["", f"- **{coin} `{meta['tag']}`** · {meta.get('upgrade_advice', '需人工确认')} · {meta.get('risk', '未标注')}", ""])
+            lines.extend(f"  {number}. {reason}" for number, reason in enumerate(reasons, 1))
+    else:
+        lines.extend(["", "本轮没有达到主动提醒条件的版本；仍发布完整审核结果，不主动 @ 用户。"])
     for coin in sorted(entries):
         coin_releases = sorted(
             (entry for entry in releases if entry[0] == coin),
@@ -2433,6 +2438,8 @@ def issue_body(
                 lines.extend(f"  {number}. {item}" for number, item in enumerate(priority, 1))
             conclusion_label = "需人工核实后再决定升级" if advice == "需人工确认" else advice
             lines.append(f"- **处置结论：** {conclusion_label}")
+            notification_status = "达到（触发原因见顶部）" if release_requires_notification(meta) else "未达到；低风险或普通变化不主动 @"
+            lines.append(f"- **主动提醒条件：** {notification_status}")
             lines.append(f"- **结论：** {issue_conclusion(meta, pending)}")
             if meta.get("upstream_upgrade_quote"):
                 lines.append(f"- **上游升级建议（非代码风险结论）：** 发行说明原文：「{meta['upstream_upgrade_quote']}」")

@@ -427,12 +427,12 @@ class WatchReleaseTests(unittest.TestCase):
             )
 
         required, _ = watch.upgrade_advice(analysis(
-            "P1", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+            "P0", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
         ))
         manual, _ = watch.upgrade_advice(analysis(
             "P3", "破坏性变更=待验证；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
         ))
-        suggested, _ = watch.upgrade_advice(analysis(
+        low_fix, _ = watch.upgrade_advice(analysis(
             "P3", "破坏性变更=无；硬分叉/共识=无；兼容性=无；内存问题=修复；安全=无；稳定性/数据=无",
         ))
         deferred, _ = watch.upgrade_advice(analysis(
@@ -441,20 +441,20 @@ class WatchReleaseTests(unittest.TestCase):
 
         self.assertEqual(required, "必须升级")
         self.assertEqual(manual, "需人工确认")
-        self.assertEqual(suggested, "建议升级")
+        self.assertEqual(low_fix, "可暂缓")
         self.assertEqual(deferred, "可暂缓")
 
         meta, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v2"}, "v1", analysis(
-                "P1", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+                "P0", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
             ),
         )
         self.assertEqual(meta["upgrade_advice"], "必须升级")
-        self.assertIn("- **处置建议：** 必须升级 · 重点关注", report)
+        self.assertIn("- **处置建议：** 必须升级 · 严重风险", report)
 
     def test_prerelease_is_labeled_and_not_recommended_for_production(self):
         analysis = (
-            "风险级别：P1\n"
+            "风险级别：P0\n"
             "重点标记：破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n"
             "重点标记依据：破坏性变更=无；硬分叉/共识=共识变更：src/consensus.rs 修改了区块验证规则；"
             "兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n1. 共识规则已变更。"
@@ -514,7 +514,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("内存问题修复", body)
         self.assertIn("完整审查", body)
         self.assertIn("建议升级", body)
-        self.assertIn("下一步：** 建议在维护窗口升级到 `v1`", body)
+        self.assertIn("下一步：** 建议尽快核对当前节点的适用条件", body)
         self.assertIn("1. **已确认 — 内存问题修复：** `src/cache.rs` 修复缓存未释放", body)
         self.assertEqual(body.count("  1. **已确认 — 内存问题修复：**"), 3)
         self.assertNotIn("标记依据", body)
