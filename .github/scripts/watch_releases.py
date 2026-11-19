@@ -108,7 +108,7 @@ SENSITIVE_PATH_RE = re.compile(
     r"(?:^|/)(?:Dockerfile|install|build|release|deploy)[^/]*)",
     re.IGNORECASE,
 )
-ISSUE_KEYS_RE = re.compile(r"(?m)^<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->$")
+ISSUE_KEYS_RE = re.compile(r"(?m)^<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->\r?$")
 REPORT_COIN_RE = re.compile(r"^### (.+)$")
 REPORT_TAG_RE = re.compile(r"^#### ([^ `]+?)(?: · (?:正式版|预发布版) · (?:完整审查|快速预检))?$")
 REPORT_REPO_RE = re.compile(r"(?m)^- 仓库：\[`([^`]+)`\]")
@@ -165,7 +165,7 @@ UNCERTAINTY
 “无” means no explicit claim or evidence in supplied material, not proof that omitted code has no issue. Use 待验证 only for an explicit, material Release Notes claim that current diff and verified in-tag historical/PR/commit code cannot resolve. Quote the exact claim briefly and state the missing code evidence; never turn suspicion, an unverified PR description, a heading alone, or a minor note into a notification-worthy claim. For code-backed 已确认/修复/风险, cite the exact changed file path and behavior. For a concrete pending Breaking Changes claim, put the exact excerpt in its existing 重点标记依据 reason as `发行说明原文：「…」`; do not add a separate notification field. Identify historical findings as previously reviewed and patches by PR number or commit SHA.
 
 NOTIFICATION THRESHOLD
-Notification priority is separate from report inclusion and from “已确认” status. Do not trigger a high-priority notification solely because any category is non-无 or code-confirmed. Notify for an explicit target-network hard fork with an upgrade requirement, a concrete material Breaking Changes claim that applies to the configured target, or a code-evidenced P0/P1 issue with a verified changed path. Keep bounded P2/P3 fixes and conditional findings in the complete report with their scope, but do not give them urgent wording or trigger a notification. A severe bundled-runtime crash loop such as the affected bundled-Tor builds remains a notification-worthy stability repair; do not dilute it among unrelated routine fixes.
+Notification priority is separate from report inclusion and from “已确认” status. Do not trigger a high-priority notification solely because any category is non-无 or code-confirmed. High-priority alerts require an explicit target-network hard fork with an upgrade requirement, a concrete material Breaking Changes claim that applies to the configured target, or a code-evidenced P0/P1 issue with a verified changed path. Keep bounded P2/P3 fixes and conditional findings in the complete report with their scope, but do not give them urgent wording or trigger a high-priority risk alert. The script separately sends ordinary operator upgrade reminders for applicable upstream recommendations in stable releases; do not inflate their risk or claim additional code evidence. A severe bundled-runtime crash loop such as the affected bundled-Tor builds remains a notification-worthy stability repair; do not dilute it among unrelated routine fixes.
 
 OUTPUT
 For a prerelease, do not recommend direct production deployment; operational advice is generated separately. Before findings, output exactly these fields in Chinese:
@@ -1262,10 +1262,15 @@ def load_scheduler_waits() -> dict[str, int]:
 
 
 def validate_chunk_review(response: str, review_id: str) -> str:
+    payload = response.strip()
+    if fence := re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```[ \t]*", payload, re.IGNORECASE | re.DOTALL):
+        payload = fence.group(1).strip()
     try:
-        result = json.loads(response)
+        result = json.loads(payload)
     except json.JSONDecodeError as error:
-        raise AIReviewError("AI 分块结果不是完整 JSON。") from error
+        raise AIReviewError(
+            f"AI 分块结果不是完整 JSON：{error.msg}（行 {error.lineno}，列 {error.colno}，位置 {error.pos}，响应长度 {len(response)}）。"
+        ) from error
     if (not isinstance(result, dict) or set(result) != {"review_id", "complete", "analysis"}
             or result["review_id"] != review_id or result["complete"] is not True
             or not isinstance(result["analysis"], str) or not result["analysis"].strip()):
@@ -1400,7 +1405,8 @@ def ask_ai(
             + "\nFor this chunk, report only segment-supported findings; do not emit final report fields or a full release summary."
         )
     for number, (chunk, file_context) in enumerate(chunks_with_context, 1):
-        print(f"Reviewing diff chunk {number}/{len(chunks)} for {repo} {release.get('tag_name')}.", flush=True)
+        chunk_description = f"diff chunk {number}/{len(chunks)} for {repo} {release.get('tag_name')}"
+        print(f"Reviewing {chunk_description}.", flush=True)
         material = "\n".join([
             f"Repository: {repo}",
             f"Release: {release.get('tag_name')}",
@@ -1417,26 +1423,44 @@ def ask_ai(
         response = cached_chunk_review(cache_key)
         try:
             analysis = validate_chunk_review(response, cache_key) if response else None
-        except AIReviewError:
+        except AIReviewError as error:
+            print(f"Discarding invalid cache for {chunk_description}: {error}", flush=True)
             analysis = None
         if analysis is None:
             complete_prompt = (
-                f"{chunk_prompt}\nReturn only JSON with exactly review_id, complete, analysis. "
+                f"{chunk_prompt}\nReturn only one complete JSON object with exactly review_id, complete, analysis, "
+                "without Markdown fences or any surrounding text. "
                 f"review_id must be {json.dumps(cache_key)}. complete must be true only after reviewing the entire segment. "
-                "analysis is a nonempty string. For each code finding include its exact file path and verbatim code snippets "
+                "analysis is a nonempty string; escape quotes and newlines inside it using valid JSON escapes. "
+                "For each code finding include its exact file path and verbatim code snippets "
                 "supporting the behavior; the final synthesis must preserve them."
             )
+            request_prompt = complete_prompt
             for attempt in range(2):
-                response = call_ai(settings, complete_prompt, material)
+                print(f"Requesting {chunk_description} (attempt {attempt + 1}/2).", flush=True)
+                try:
+                    response = call_ai(settings, request_prompt, material)
+                except AIReviewError as error:
+                    failure = f"AI request failed for {chunk_description}: {error}"
+                    print(failure, flush=True)
+                    raise AIReviewError(failure) from error
                 try:
                     analysis = validate_chunk_review(response, cache_key)
                     break
-                except AIReviewError:
+                except AIReviewError as error:
+                    print(f"Invalid result for {chunk_description} (attempt {attempt + 1}/2): {error}", flush=True)
                     if attempt:
-                        raise
+                        raise AIReviewError(f"{chunk_description} failed after 2 attempts: {error}") from error
+                    request_prompt = (
+                        f"{complete_prompt}\n\nThe prior response failed validation: {error}\n"
+                        "Review the entire supplied segment and return a fresh, complete JSON object, "
+                        "not a fragment or a correction patch. Follow the exact schema and review_id above. "
+                        "Do not add explanatory text or Markdown. Never mark an unfinished review complete."
+                    )
             save_chunk_review(cache_key, response)
         else:
             print(f"Reusing verified diff chunk {number}/{len(chunks)} cache for {repo} {release.get('tag_name')}.", flush=True)
+        print(f"Completed verified {chunk_description}.", flush=True)
         reviews.append(f"## Chunk {number}/{len(chunks)}\n{analysis}")
 
     material = "\n".join([
@@ -1961,6 +1985,11 @@ def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, s
             elif match := (REPORT_REPO_RE.match(line) or REPORT_HIDDEN_REPO_RE.match(line)):
                 if coin and tag:
                     found.add((coin, match.group(1), tag))
+    return found | reported_issue_releases(issues)
+
+
+def reported_issue_releases(issues: list[dict] | None = None) -> set[tuple[str, str, str]]:
+    found = set()
     for issue in issues or []:
         author = issue.get("author") or issue.get("user") or {}
         if author.get("login") != "github-actions[bot]":
@@ -1983,6 +2012,16 @@ def reported_releases(issues: list[dict] | None = None) -> set[tuple[str, str, s
                 continue
             found.update(tuple(key) for key in keys)
     return found
+
+
+def notified_releases(issues: list[dict] | None = None) -> set[tuple[str, str, str]]:
+    mentioned_issues = []
+    for issue in issues or []:
+        mention = re.search(r"(?m)^通知对象：[ \t]*([^\r\n]+)\r?\n\r?\n## 完整报告\r?$", issue.get("body") or "")
+        if (mention and (logins := mention.group(1).split())
+                and all(login.startswith("@") and GITHUB_LOGIN_RE.fullmatch(login[1:]) for login in logins)):
+            mentioned_issues.append(issue)
+    return reported_issue_releases(mentioned_issues)
 
 
 def release_review_sections(text: str, coin: str, issue: bool = False) -> dict[str, str]:
@@ -2154,8 +2193,9 @@ def release_requires_notification(meta: dict) -> bool:
         return True
     if meta.get("breaking_note_quote"):
         return True
-    # Keep bounded confirmed findings in reports; only severe, evidence-backed
-    # findings and explicit operator upgrade declarations need an alert.
+    if meta.get("release_channel") == "正式版" and meta.get("upstream_upgrade_quote"):
+        return True
+    # Ordinary bounded findings still need severe, verified impact for a risk alert.
     return meta.get("risk") in {"P0", "P1"} and bool(meta.get("verified_finding_paths"))
 
 
@@ -2221,7 +2261,7 @@ def issue_body(
         f"<!-- watch-release-keys: {encoded_keys} -->",
         "# 节点版本审查摘要",
         "",
-        f"本轮发现 **{len(releases)} 个新版本**，涉及 **{len(entries)} 个币种：** "
+        f"本轮完成 **{len(releases)} 个版本审查**，涉及 **{len(entries)} 个币种：** "
         + "、".join(
             f"{coin}（{sum(len(items) for items in repos.values())} 个版本）"
             for coin, repos in sorted(entries.items())
@@ -2242,6 +2282,8 @@ def issue_body(
                 for label, reason in confirmed
             ]
             items.extend(("⚠️", f"待核实 — {label}", reason) for label, reason in pending)
+            if meta.get("release_channel") == "正式版" and (quote := meta.get("upstream_upgrade_quote")):
+                items.append(("🔔", "运营升级提醒（非紧急风险警报）", f"上游建议升级，发行说明原文：「{quote}」"))
             if items:
                 lines.extend(
                     f"  {number}. {icon} **{label}：** {reason}"
@@ -2303,7 +2345,7 @@ def prepare_batch_issue(entries: dict[str, dict[str, list[tuple[dict, str]]]], p
         return
     notify_entries = notification_entries(entries)
     if not notify_entries:
-        print("No major release findings; creating an Issue without @mentions.", flush=True)
+        print("No risk alerts or operator upgrade reminders; creating an Issue without @mentions.", flush=True)
     body_file = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / f"upstream-release-issue-{batch_digest(entries)}.md"
     body = issue_body(entries, pending_failures, include_mentions=bool(notify_entries))
     body_file.write_text(body, encoding="utf-8")
@@ -2379,6 +2421,7 @@ def main() -> None:
     reviewed = 0
     issue_history = github_issue_history() if should_read_github_issue_history() else None
     processed = reported_releases(issue_history)
+    notified = notified_releases(issue_history)
     new_entries: dict[str, dict[str, list[tuple[dict, str]]]] = {}
     waits = load_scheduler_waits()
     queues = []
@@ -2395,8 +2438,16 @@ def main() -> None:
             )
             queue["pending"] = []
             for release in releases:
-                if (coin, repo, release["tag_name"]) not in processed:
+                key = (coin, repo, release["tag_name"])
+                release["_target_network"] = target_network
+                recheck_upgrade = (
+                    issue_history is not None and key in processed and key not in notified
+                    and release_channel(release) == "正式版" and bool(explicit_upgrade_recommendation(release))
+                )
+                if key not in processed or recheck_upgrade:
                     queue["pending"].append((release, previous))
+                    if recheck_upgrade:
+                        print(f"Rechecking {repo} {release['tag_name']}: operator upgrade recommendation was not previously @mentioned.", flush=True)
                 previous = release["tag_name"]
             print(f"Discovered {repo}: {len(queue['pending'])} unreviewed Release(s).", flush=True)
         except Exception as error:

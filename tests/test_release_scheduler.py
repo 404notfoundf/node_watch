@@ -82,6 +82,52 @@ class ReleaseSchedulerTests(unittest.TestCase):
         self.assertEqual(self.completed, [("A", f"v{n}") for n in range(2, 6)])
         self.assertEqual(len(self.attempts), 4)
 
+    def test_previously_unmentioned_operator_upgrade_is_rechecked_and_notified_once(self):
+        note = "Fixed a mempool cache issue, highly recommended for mining pools and node operators."
+        self.releases = {"A": ["v1"], "B": ["v1"], "C": []}
+        self.processed.update({("A", "A/repo", "v1"), ("B", "B/repo", "v1")})
+        meta, report = watch.format_release("A", "A/repo", {"tag_name": "v1", "body": note}, "v0", watch.final_analysis_from_json(EMPTY_AI_REVIEW))
+        history = [{"user": {"login": "github-actions[bot]"}, "body": watch.issue_body({"A": {"A/repo": [(meta, report)]}})}]
+        def discover(repo, running, prereleases):
+            releases, previous = self.discover(repo, running, prereleases)
+            if repo == "A/repo":
+                releases[0]["body"] = note
+            return releases, previous
+        def publish(entries, failures):
+            history.append({"user": {"login": "github-actions[bot]"}, "body": watch.issue_body(entries, failures, include_mentions=bool(watch.notification_entries(entries)))})
+        self.discovery.side_effect = discover
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "NOTIFY_LOGINS": "alice"}), \
+                patch.object(watch, "should_read_github_issue_history", return_value=True), \
+                patch.object(watch, "github_issue_history", side_effect=lambda: history), \
+                patch.object(watch, "prepare_batch_issue", side_effect=publish):
+            self.run_round()
+            self.assertEqual(self.completed, [("A", "v1")])
+            self.assertIn("通知对象：@alice", history[-1]["body"])
+            self.assertIn("运营升级提醒", history[-1]["body"])
+            self.run_round()
+            self.assertEqual(self.attempts, [])
+            self.assertEqual(self.completed, [])
+
+    def test_failed_upgrade_recheck_remains_eligible_on_next_round(self):
+        self.releases = {"A": ["v1"], "B": [], "C": []}
+        self.processed.add(("A", "A/repo", "v1"))
+        def discover(repo, running, prereleases):
+            releases, previous = self.discover(repo, running, prereleases)
+            for release in releases:
+                release["body"] = "Node operators should upgrade."
+            return releases, previous
+        self.discovery.side_effect = discover
+        with patch.object(watch, "should_read_github_issue_history", return_value=True), \
+                patch.object(watch, "github_issue_history", return_value=[]):
+            self.ai.side_effect = watch.AIReviewError("HTTP 503")
+            with self.assertRaises(RuntimeError):
+                self.run_round()
+            self.assertEqual(len(self.attempts), 1)
+            self.assertEqual(self.completed, [])
+            self.ai.side_effect = None
+            self.run_round()
+            self.assertEqual(self.completed, [("A", "v1")])
+
     def test_processed_releases_do_not_inflate_queue_size_or_break_baseline(self):
         self.processed.update(("A", "A/repo", f"v{n}") for n in range(1, 8))
         self.run_round()

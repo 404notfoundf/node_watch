@@ -504,7 +504,7 @@ class WatchReleaseTests(unittest.TestCase):
             body = watch.issue_body(entries, include_mentions=True)
             title = watch.issue_title(entries)
 
-        self.assertIn("3 个新版本", body)
+        self.assertIn("3 个版本审查", body)
         self.assertIn("涉及 **2 个币种：** coin-b（2 个版本）、tari（1 个版本）", body)
         self.assertIn("## coin-b", body)
         self.assertIn("## tari", body)
@@ -567,6 +567,30 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertEqual(watch.reported_releases(issues), set(releases))
             finally:
                 watch.REPORTS = original_reports
+
+    def test_notified_release_keys_require_a_trusted_issue_and_real_notification_footer(self):
+        keys = [("alephium", "alephium/alephium", "v4.7.2")]
+        encoded = watch.base64.urlsafe_b64encode(json.dumps(keys).encode()).decode().rstrip("=")
+        marker = f"<!-- watch-release-keys: {encoded} -->\n"
+        footer = "通知对象：@alice @bob\n\n## 完整报告\n"
+        bot = {"login": "github-actions[bot]"}
+        for ending in ("\n", "\r\n"):
+            with self.subTest(ending=repr(ending)):
+                body = (marker + footer).replace("\n", ending)
+                self.assertEqual(watch.notified_releases([{"user": bot, "body": body}]), set(keys))
+        bodies = [
+            marker,
+            marker + "Release note mentions @alice.\n\n## 完整报告\n",
+            marker + "通知对象：   \n\n## 完整报告\n",
+            marker + "通知对象：@invalid_user\n\n## 完整报告\n",
+            marker + "通知对象：@alice is a PR author\n\n## 完整报告\n",
+            marker + "通知对象：@alice\nThis is not the notification footer.\n",
+            "<!-- watch-release-keys: invalid! -->\n" + footer,
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertEqual(watch.notified_releases([{"user": bot, "body": body}]), set())
+        self.assertEqual(watch.notified_releases([{"user": {"login": "alice"}, "body": marker + footer}]), set())
 
     def test_pages_release_state_does_not_override_issue_deduplication(self):
         issue_keys = [("tari", "tari-project/tari", "v6.3.0-pre.2")]

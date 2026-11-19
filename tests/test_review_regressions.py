@@ -20,6 +20,39 @@ class ReviewRegressionTests(unittest.TestCase):
         self.addCleanup(cache.cleanup)
         self.enterContext(patch.object(watch, "REVIEW_CACHE", Path(cache.name)))
 
+    def test_operator_upgrade_recommendation_notifies_without_inflating_risk(self):
+        release = {"tag_name": "v4.7.2", "_target_network": "mainnet", "body": ALEPHIUM_UPGRADE_NOTE}
+        meta, report = watch.format_release("alephium", "alephium/alephium", release, "v4.7.1", watch.final_analysis_from_json(EMPTY_AI_REVIEW))
+        self.assertTrue(watch.release_requires_notification(meta))
+        self.assertEqual(meta["risk"], "P3")
+        self.assertEqual(meta["verified_finding_paths"], [])
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "NOTIFY_LOGINS": "alice", "RUNNER_TEMP": directory}), \
+                patch.object(watch, "set_workflow_output") as output:
+            watch.prepare_batch_issue({"alephium": {"alephium/alephium": [(meta, report)]}})
+            values = dict(call.args for call in output.call_args_list)
+            body = watch.base64.b64decode(values["issue_body_base64"]).decode("utf-8")
+            self.assertEqual(Path(values["issue_body_path"]).read_text(encoding="utf-8"), body)
+        self.assertIn("运营升级提醒", body)
+        self.assertIn("通知对象：@alice", body)
+        self.assertNotIn("🚨", body)
+
+    def test_operator_reminders_exclude_prereleases_and_wrong_scope(self):
+        releases = [
+            {"tag_name": "v4.7.2-rc.1", "body": ALEPHIUM_UPGRADE_NOTE},
+            {"tag_name": "v4.7.2", "prerelease": True, "body": ALEPHIUM_UPGRADE_NOTE},
+            {"tag_name": "v4.7.2", "body": "Testnet only. " + ALEPHIUM_UPGRADE_NOTE},
+            {"tag_name": "v4.7.2", "body": "This release is not recommended for node operators."},
+            {"tag_name": "v4.7.2", "body": "This update is strongly recommended for wallet users only."},
+            {"tag_name": "v4.7.2", "body": "We recommend upgrading the Python toolchain."},
+            {"tag_name": "v4.7.2", "body": "Routine update."},
+        ]
+        for release in releases:
+            with self.subTest(release=release):
+                release["_target_network"] = "mainnet"
+                meta, _ = watch.format_release("coin", "o/r", release, "v1", watch.final_analysis_from_json(EMPTY_AI_REVIEW))
+                self.assertFalse(watch.release_requires_notification(meta))
+
     def test_alephium_recommendation_survives_empty_p3_review(self):
         release = {"tag_name": "v4.7.2", "_target_network": "mainnet", "body": ALEPHIUM_UPGRADE_NOTE}
         mode = watch.review_mode("auto", release, ROUTINE_DIFF)
@@ -34,12 +67,12 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertTrue(all(status == "无" for status in meta["highlight_statuses"].values()))
         self.assertIn(ALEPHIUM_UPGRADE_NOTE, report)
         self.assertIn(ALEPHIUM_UPGRADE_NOTE, issue)
-        self.assertEqual(issue.count(ALEPHIUM_UPGRADE_NOTE), 1)
+        self.assertEqual(issue.count(ALEPHIUM_UPGRADE_NOTE), 2)
         self.assertIn("上游升级建议", issue)
         self.assertIn("维护窗口", watch.issue_action_line(meta))
         self.assertNotIn("可暂缓", issue)
         self.assertNotIn("不重要", report)
-        self.assertFalse(watch.release_requires_notification(meta))
+        self.assertTrue(watch.release_requires_notification(meta))
 
     def test_similar_operator_recommendations_trigger_full_review(self):
         notes = (
