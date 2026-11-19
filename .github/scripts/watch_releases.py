@@ -62,6 +62,22 @@ FULL_REVIEW_NOTE_RE = re.compile(
     r"区块验证|验证规则|区块头|燃烧承诺|时间锁|密钥清零|身份认证|凭据|数据库损坏|原子重置",
     re.IGNORECASE,
 )
+UPGRADE_RECOMMENDATION_RE = re.compile(
+    r"\b(?:recommend(?:ed|s)?|advis(?:e[ds]?|able)|encourag(?:e[ds]?)|urg(?:e[ds]?))\b.{0,120}"
+    r"\b(?:upgrad(?:e|ing)|updat(?:e|ing)|release|version|mining pools?|pool operators?|node operators?|nodes?|validators?|miners?|all users|everyone)\b|"
+    r"\b(?:upgrad(?:e|ing)|updat(?:e|ing))\b.{0,80}\b(?:recommended|advised|encouraged|required|mandatory)\b|"
+    r"\b(?:please|must|should|need to|are required to)\s+(?:upgrade|update)\b|"
+    r"\b(?:important|critical|urgent|mandatory)\b.{0,40}\b(?:release|update|upgrade)\b.{0,60}"
+    r"\b(?:mining pools?|node operators?|validators?|miners?|all users)\b|"
+    r"\b(?:mining pools?|node operators?|validators?|miners?|all users)\b.{0,60}"
+    r"\b(?:important|critical|urgent|mandatory)\s+(?:release|update|upgrade)\b|"
+    r"(?:建议|推荐|敦促|必须|务必|应当|应该|需要|请).{0,80}(?:升级|更新)|"
+    r"(?:升级|更新).{0,40}(?:建议|推荐)|"
+    r"(?:强烈|高度)推荐.{0,60}(?:矿池|节点)|"
+    r"(?:矿池|节点).{0,40}(?:重要|关键|紧急)(?:的)?(?:版本|更新|升级)|"
+    r"(?:重要|关键|紧急)(?:的)?(?:版本|更新|升级).{0,40}(?:矿池|节点)",
+    re.IGNORECASE,
+)
 SUSPICIOUS_DIFF_RE = re.compile(
     r"\b(?:curl|wget|invoke-webrequest|downloadstring|urllib\.request\.urlopen|requests\.(?:get|post)|"
     r"http\.get|reqwest::get|importlib\.import_module|__import__\s*\(|import\s*\(|os\.system|subprocess\.(?:run|call|popen)|"
@@ -142,6 +158,9 @@ When `Operator target network` is supplied, judge risk, upgrade advice and notif
 For config validation changes, compare new bounds with compiled defaults, shipped presets and documented supported values. A parser newly rejecting out-of-range values is not automatically a compatibility break. If omitted settings use defaults that remain within bounds, say defaults remain valid. Mark a material config compatibility issue only when a previously supported setting is now rejected or the supplied operator configuration is known to use a rejected value. If actual operator overrides are unknown, describe the failure conditionally and do not claim the monitored node is affected or notify on that basis alone.
 For diagnostic or repair commands, distinguish a manually invoked check/autocorrect workflow from normal node operation. State the command/mode and required database state. A false-positive rewind of a locally resyncable chain that requires an operator to run autocorrect is a bounded operational risk by default, not evidence of ordinary runtime corruption or lost funds; raise it to P1 only if the code proves likely unrecoverable data loss or the workflow runs automatically in the configured production path.
 
+UPSTREAM UPGRADE RECOMMENDATIONS
+Explicit release-level upgrade recommendations for mining pools, node operators or all users are operationally relevant even when no P0/P1 code risk is confirmed. Examine the changed runtime path, affected network and operator role; do not dismiss an operator-facing fix merely because it is small. The script preserves the upstream recommendation separately from code findings. Do not inflate severity, claim a hard fork, or invent code-confirmed consequences solely from wording such as highly recommended, important update or must upgrade. Dependency/toolchain or wallet-only advice is not a node upgrade recommendation. A prerelease is still not a direct production deployment recommendation.
+
 UNCERTAINTY
 “无” means no explicit claim or evidence in supplied material, not proof that omitted code has no issue. Use 待验证 only for an explicit, material Release Notes claim that current diff and verified in-tag historical/PR/commit code cannot resolve. Quote the exact claim briefly and state the missing code evidence; never turn suspicion, an unverified PR description, a heading alone, or a minor note into a notification-worthy claim. For code-backed 已确认/修复/风险, cite the exact changed file path and behavior. For a concrete pending Breaking Changes claim, put the exact excerpt in its existing 重点标记依据 reason as `发行说明原文：「…」`; do not add a separate notification field. Identify historical findings as previously reviewed and patches by PR number or commit SHA.
 
@@ -162,7 +181,8 @@ HISTORICAL_REVIEW_PROMPT = """Historical prerelease reviews and linked upstream 
 FINAL_JSON_OUTPUT_PROMPT = """Return only one JSON object, without Markdown fences or any surrounding text. Its exact keys are `risk`, `highlights`, `confirmed_findings`, and `pending_claims`.
 `risk` is one of `P0`, `P1`, `P2`, `P3`, `待人工复核`.
 `highlights` has exactly these six keys: `破坏性变更`, `硬分叉/共识`, `兼容性`, `内存问题`, `安全`, `稳定性/数据`. Each value is an object with exactly `status` and `reason`. Statuses follow the stated category rules; use `无` with reason `无` where there is no finding. Reasons are concise, use no semicolons, and code-backed reasons cite exact paths in backticks. Start each non-无 code-backed reason with its severity prefix `P0：`, `P1：`, `P2：` or `P3：`; only P0/P1 reasons are eligible for the priority summary. Except when `risk` is `待人工复核`, the overall risk must be at least as severe as every code-backed category severity. Pending Release Notes claims need not use a severity prefix.
-`confirmed_findings` and `pending_claims` are arrays of objects with exactly `category` and `text`. Category is one of the six highlight keys. Confirmed items must match a non-`无`, non-`待验证` highlight; pending items must match a `待验证` highlight. Every non-`无` highlight must have at least one matching finding or pending claim. Keep text concise and evidence-based. Return empty arrays when there are no items."""
+`confirmed_findings` items have exactly `category`, `text`, and `evidence`. Each evidence is a nonempty array of objects with exactly `path` and `quote`: an exact supplied file path and a verbatim nontrivial code snippet from that file, not a diff header, comment, filename, release note or prior AI prose. Do not invent or paraphrase code. Quote code supporting the actual claimed behavior, including callers when needed. In synthesis preserve these quotes from the chunks. If no supplied code supports a finding, do not call it confirmed.
+`pending_claims` items have exactly `category` and `text`. Category is one of the six highlight keys. Confirmed items must match a non-`无`, non-`待验证` highlight; pending items must match a `待验证` highlight. Every non-`无` highlight must have at least one matching finding or pending claim. Keep text concise and evidence-based. Return empty arrays when there are no items."""
 FAST_BATCH_JSON_OUTPUT_PROMPT = FINAL_JSON_OUTPUT_PROMPT.replace(
     "Return only one JSON object, without Markdown fences or any surrounding text.",
     "For each input, return exactly one block starting with `--- REVIEW <id> ---` followed immediately by one JSON object. "
@@ -178,6 +198,10 @@ HIGHLIGHT_FIELDS = {
 }
 
 class AIReviewError(RuntimeError):
+    pass
+
+
+class AIIncompleteError(AIReviewError):
     pass
 
 
@@ -374,6 +398,72 @@ def normalize_quote(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def notice_applies_to_network(context: str, release: dict, require_network: bool = False) -> bool:
+    target = str(release.get("_target_network") or "").lower()
+    networks = r"mainnet|testnet|devnet|主网|测试网|开发网"
+    aliases = {"主网": "mainnet", "测试网": "testnet", "开发网": "devnet"}
+    target = aliases.get(target, target)
+    mentions = list(re.finditer(networks, context, re.IGNORECASE))
+    if not mentions:
+        return not require_network
+    if not target:
+        return False
+    target_names = [target] + [name for name, canonical in aliases.items() if canonical == target]
+    for name in target_names:
+        if re.search(rf"{re.escape(name)}\s*(?:is\s+|remains\s+)?(?:unaffected|not affected|不受影响|无需升级)", context, re.IGNORECASE):
+            return False
+    fork = re.search(r"hard[- ]?fork|硬分叉|breaking\s+(?:changes|notes)", context, re.IGNORECASE)
+    before = [match for match in mentions if not fork or match.start() < fork.start()]
+    scope = before[-1] if before else mentions[0]
+    return aliases.get(scope.group().lower(), scope.group().lower()) == target
+
+
+def explicit_upgrade_recommendation(release: dict) -> str:
+    notes = re.sub(r"(?ms)^\s*(```|~~~).*?(?:^\s*\1[ \t]*$|\Z)", "", release_notes(release))
+    headings = [(0, str(release.get("name") or ""))]
+    # shortcut: recognize explicit operator advice, not arbitrary prose; extend with real missed-note regressions.
+    for paragraph in re.split(r"\n\s*\n|(?=^#{1,6}\s)", notes, flags=re.MULTILINE):
+        if heading := re.match(r"^(#{1,6})\s+([^\n]*)", paragraph):
+            level = len(heading.group(1))
+            while headings and headings[-1][0] >= level:
+                headings.pop()
+            headings.append((level, heading.group(2)))
+        quote = normalize_quote(paragraph.removeprefix("Release title: "))
+        text = re.sub(r"[*_`]", "", quote)
+        if not UPGRADE_RECOMMENDATION_RE.search(text):
+            continue
+        context = "\n".join([*(label for _, label in headings), text])
+        if not notice_applies_to_network(context, release):
+            continue
+        if re.search(
+            r"\b(?:not|never)\s+(?:(?:a|currently|yet|highly|strongly)\s+)*(?:recommended|advised|required|needed|necessary)\b|"
+            r"\b(?:not|never|avoid(?:ing)?|postpon(?:e|ing)|delay(?:ing)?)\s+(?:upgrad(?:e|ing)|updat(?:e|ing))\b|"
+            r"\b(?:do|does|should|must|need)\s+not\s+(?:recommend|upgrade|update)\b|"
+            r"\bdon't\s+(?:recommend|upgrade|update)\b|\bno\s+(?:need|requirement)\s+to\s+(?:upgrade|update)\b|"
+            r"\bno\s+(?:upgrade|update)\s+(?:is\s+)?(?:required|needed|necessary)\b|"
+            r"\boptional\s+(?:upgrade|update)\b|(?:不|暂不)(?:建议|推荐)|(?:无需|不必|不要|暂不|暂缓|推迟)(?:.{0,20})(?:升级|更新)",
+            text, re.IGNORECASE,
+        ):
+            continue
+        if re.search(
+            r"\b(?:upgrad(?:e|ing)|updat(?:e|ing))\s+(?:(?:the|your|their|our)\s+)?"
+            r"(?:dependencies|dependency|libraries|library|toolchains?|compilers?|SDK|GUI|wallets?|configuration|settings|documentation)\b|"
+            r"(?:升级|更新).{0,8}(?:依赖|工具链|钱包|配置|文档)", text, re.IGNORECASE,
+        ):
+            continue
+        if re.search(
+            r"\bonly\s+(?:for\s+)?(?:wallet users?|light[ -]?clients?)\b|"
+            r"\b(?:wallet users?|light[ -]?clients?)\s+only\b|"
+            r"(?:仅|只)(?:供|面向|针对)?.{0,8}(?:钱包|轻客户端)", text, re.IGNORECASE,
+        ):
+            continue
+        operator = re.search(r"\b(?:mining pools?|pool operators?|node operators?|nodes?|validators?|miners?)\b|矿池|节点|验证者", context, re.IGNORECASE)
+        if not operator and re.search(r"\b(?:wallets?|light[ -]?clients?|GUI|SDK|toolchains?|compilers?|dependencies|dependency|libraries|library)\b|钱包|轻客户端|工具链|依赖", context, re.IGNORECASE):
+            continue
+        return quote
+    return ""
+
+
 def breaking_note_quote(analysis: str, release: dict) -> str:
     label, section = breaking_section(release)
     if not label:
@@ -388,39 +478,33 @@ def breaking_note_quote(analysis: str, release: dict) -> str:
     reason = reasons.get("破坏性变更", "")
     quote_match = re.search(r"发行说明原文[：:]\s*[「“\"](.+?)[」”\"]", reason)
     quote = quote_match.group(1).strip() if quote_match else ""
-    if quote and normalize_quote(quote) in normalize_quote(section):
+    if quote and normalize_quote(quote) in normalize_quote(section) and notice_applies_to_network(quote, release):
         return quote
     return ""
 
 
 def explicit_hard_fork_notice(release: dict) -> tuple[str, bool, str] | None:
     body = str(release.get("body") or "")
-    height = re.search(r"\b(?:block\s+height|activation\s+height)\s*(?:of\s*)?([\d,]+)|(?:区块高度|激活高度)\s*[:：]?\s*([\d,]+)", body, re.IGNORECASE)
-    deadline = re.search(
-        r"(?:upgrade\s+(?:deadline|before|by)|must\s+upgrade\s+(?:before|by)|before|by|升级(?:截止时间|期限)|截止日期|必须.{0,20}升级.{0,20}前)\s*[:：]?\s*(\d{4}-\d{2}-\d{2})",
-        body,
-        re.IGNORECASE,
-    )
-    if not height and not deadline:
-        return None
-    marker = height or deadline
-    activation = f"区块高度 {height.group(1) or height.group(2)}" if height else f"升级期限 {deadline.group(1)}"
-    context_start = max(0, marker.start() - 260)
-    context_end = min(len(body), marker.end() + 220)
-    context = body[context_start:context_end]
-    fork_mentions = list(re.finditer(r"hard[- ]fork|hardfork|硬分叉", context, re.IGNORECASE))
-    if not fork_mentions:
-        return None
-    fork_mention = fork_mentions[-1]
-    if not deadline and not re.search(r"activat\w*|激活|生效|fork off|分叉", context, re.IGNORECASE):
-        return None
-    requires_upgrade = bool(re.search(
-        r"\bmust\s+upgrade\b.{0,100}\b(?:before|by)\b|\ball\s+node\s+operators\b.{0,120}\bupgrade\b|\bupgrade\s+(?:deadline|by|before)\b|\bolder\s+versions?\b.{0,100}\bfork\s+off\b|必须.{0,50}升级|升级(?:截止时间|期限)|所有.{0,30}节点.{0,30}升级|旧版本.{0,80}(?:分叉|离网)",
-        context,
-        re.IGNORECASE | re.DOTALL,
-    ))
-    quote = body[context_start + fork_mention.start():context_end].strip(" \t-–—:")
-    return activation, requires_upgrade, quote
+    height_re = r"\b(?:block\s+height|activation\s+height)\s*(?:of\s*)?([\d,]+)|(?:区块高度|激活高度)\s*[:：]?\s*([\d,]+)"
+    deadline_re = r"(?:upgrade\s+(?:deadline|before|by)|must\s+upgrade\s+(?:before|by)|before|by|升级(?:截止时间|期限)|截止日期|必须.{0,20}升级.{0,20}前)\s*[:：]?\s*(\d{4}-\d{2}-\d{2})"
+    # Keep different network notices in separate paragraphs instead of mixing their heights.
+    for paragraph in re.split(r"\n\s*\n", body):
+        if not notice_applies_to_network(paragraph, release, require_network=True):
+            continue
+        height = re.search(height_re, paragraph, re.IGNORECASE)
+        deadline = re.search(deadline_re, paragraph, re.IGNORECASE)
+        fork = re.search(r"hard[- ]?fork|硬分叉", paragraph, re.IGNORECASE)
+        if not fork or (not height and not deadline):
+            continue
+        if not deadline and not re.search(r"activat\w*|激活|生效|fork off|分叉", paragraph, re.IGNORECASE):
+            continue
+        activation = f"区块高度 {height.group(1) or height.group(2)}" if height else f"升级期限 {deadline.group(1)}"
+        requires_upgrade = bool(re.search(
+            r"\bmust\s+upgrade\b.{0,100}\b(?:before|by)\b|\ball\s+node\s+operators\b.{0,120}\bupgrade\b|\bupgrade\s+(?:deadline|by|before)\b|\bolder\s+versions?\b.{0,100}\bfork\s+off\b|必须.{0,50}升级|升级(?:截止时间|期限)|所有.{0,30}节点.{0,30}升级|旧版本.{0,80}(?:分叉|离网)",
+            paragraph, re.IGNORECASE | re.DOTALL,
+        ))
+        return activation, requires_upgrade, paragraph.strip()
+    return None
 
 
 def name_status_paths(output: str) -> set[str]:
@@ -568,6 +652,44 @@ def diff_sections(diff: str) -> list[tuple[str, str]]:
     return sections
 
 
+def review_code_evidence(diff: str, references: str = "") -> dict[str, str]:
+    evidence = {path: section for path, section in diff_sections(diff)}
+    for match in re.finditer(r'(?m)^Code patch for ("[^\n]*"):\n(.*?)(?=^Code patch for |^## |\Z)', references, re.DOTALL):
+        try:
+            path = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        patch_lines = []
+        in_hunk = False
+        for line in match.group(2).splitlines():
+            if line.startswith("@@"):
+                in_hunk = True
+            elif line.startswith(("+", "-", " ")) and in_hunk:
+                patch_lines.append(line)
+            else:
+                in_hunk = False
+        if isinstance(path, str) and patch_lines:
+            evidence[path] = evidence.get(path, "") + "\n" + "\n".join(patch_lines)
+    return evidence
+
+
+def code_quote_matches(path: str, quote: str, evidence: dict[str, str]) -> bool:
+    normalized = normalize_quote(quote)
+    if len(normalized) < 8 or normalized.startswith(("//", "#", "/*", "*")):
+        return False
+    for excluded in ("+", "-"):
+        lines = []
+        for line in evidence.get(path, "").splitlines():
+            if line.startswith(("diff --git ", "--- ", "+++ ", "@@", "index ", excluded)):
+                continue
+            code = line[1:] if line.startswith(("+", "-", " ")) else line
+            if not code.lstrip().startswith(("//", "/*", "*", "# ")):
+                lines.append(code)
+        if normalized in normalize_quote("\n".join(lines)):
+            return True
+    return False
+
+
 def suspicious_diff_hunks(diff: str) -> list[str]:
     hunks = []
     for path, section in diff_sections(diff):
@@ -588,13 +710,22 @@ def suspicious_diff_hunks(diff: str) -> list[str]:
 def release_note_claims(release_notes: str) -> str:
     lines = release_notes.splitlines()
     claims = []
+    headings = []
     index = 0
     while index < len(lines):
         line = lines[index].strip()
-        if not line or not FULL_REVIEW_NOTE_RE.search(line):
+        if line.startswith("Release title: "):
+            headings = [(0, line)]
+        elif heading := re.match(r"^(#{1,6})\s+", line):
+            level = len(heading.group(1))
+            while headings and headings[-1][0] >= level:
+                headings.pop()
+            headings.append((level, line))
+        plain = re.sub(r"[*_`]", "", line)
+        if not line or not (FULL_REVIEW_NOTE_RE.search(plain) or UPGRADE_RECOMMENDATION_RE.search(plain)):
             index += 1
             continue
-        claim = [line]
+        claim = [*(label for _, label in headings if label != line), line]
         index += 1
         if re.match(r"^#{1,6}\s+", line):
             while index < len(lines) and not re.match(r"^\s*#{1,6}\s+", lines[index]):
@@ -876,13 +1007,13 @@ def requires_full_review_path(path: str) -> bool:
     path = path.replace("\\", "/")
     if re.search(r"(?:^|/)(?:tests?|docs?)(?:/|$)|\.(?:md|rst)$", path, re.IGNORECASE):
         return False
-    return bool(FULL_REVIEW_PATH_RE.search(path))
+    return bool(FULL_REVIEW_PATH_RE.search(path) or SENSITIVE_PATH_RE.search(path))
 
 
 def review_mode(mode: str, release: dict, diff: str) -> str:
     if mode != "auto":
         return mode
-    if FULL_REVIEW_NOTE_RE.search(release_notes(release)) or local_full_review_reasons(diff):
+    if FULL_REVIEW_NOTE_RE.search(release_notes(release)) or explicit_upgrade_recommendation(release) or local_full_review_reasons(diff):
         return "full"
     return "fast"
 
@@ -970,7 +1101,10 @@ def call_ai(settings: dict, system_prompt: str, material: str) -> str:
             with urllib.request.urlopen(request, timeout=180) as response:
                 body = json.loads(response.read().decode("utf-8"))
             try:
-                content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+                choice = body.get("choices", [{}])[0]
+                if choice.get("finish_reason") not in {None, "stop"}:
+                    raise AIIncompleteError(f"AI 响应未完成：{choice.get('finish_reason')}")
+                content = choice.get("message", {}).get("content", "")
             except (AttributeError, IndexError, TypeError) as error:
                 raise AIReviewError("AI 返回格式无效。") from error
             if not isinstance(content, str) or not content.strip():
@@ -983,7 +1117,7 @@ def call_ai(settings: dict, system_prompt: str, material: str) -> str:
                 raise AIReviewError(f"AI 调用失败：HTTP {error.code}，重试 {attempts} 次后停止") from error
             wait = 5 * (2 ** (attempt - 1))
             print(f"AI HTTP {error.code}; retry {attempt}/{attempts - 1} after {wait}s.", flush=True)
-        except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError) as error:
+        except (AIIncompleteError, TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError) as error:
             if attempt == attempts:
                 raise AIReviewError(f"AI 调用失败：{type(error).__name__}，重试 {attempts} 次后停止") from error
             wait = 5 * (2 ** (attempt - 1))
@@ -991,7 +1125,7 @@ def call_ai(settings: dict, system_prompt: str, material: str) -> str:
         time.sleep(wait)
 
 
-def final_analysis_from_json(response: str) -> str:
+def final_analysis_from_json(response: str, code_evidence: dict[str, str] | None = None) -> str:
     try:
         data = json.loads(response)
     except json.JSONDecodeError as error:
@@ -1028,18 +1162,36 @@ def final_analysis_from_json(response: str) -> str:
             raise AIReviewError("AI JSON 审查结果的发现列表无效。")
         validated = []
         for item in items:
-            if not isinstance(item, dict) or set(item) != {"category", "text"}:
+            fields = {"category", "text", "evidence"} if name == "confirmed_findings" else {"category", "text"}
+            if not isinstance(item, dict) or set(item) != fields:
                 raise AIReviewError("AI JSON 审查结果的发现项格式无效。")
             category, text = item.get("category"), item.get("text")
             if (not isinstance(category, str) or category not in HIGHLIGHT_FIELDS
                     or statuses[category] not in allowed_statuses or not isinstance(text, str)
                     or not text.strip() or "\n" in text or "\r" in text):
                 raise AIReviewError("AI JSON 审查结果的发现项内容无效。")
+            if name == "confirmed_findings":
+                proofs = item.get("evidence")
+                if not isinstance(proofs, list) or not proofs:
+                    raise AIReviewError("AI JSON 代码发现缺少可核实的代码片段。")
+                for proof in proofs:
+                    if (not isinstance(proof, dict) or set(proof) != {"path", "quote"}
+                            or not all(isinstance(proof[key], str) for key in ("path", "quote"))
+                            or not code_quote_matches(proof["path"], proof["quote"], code_evidence or {})):
+                        raise AIReviewError("AI JSON 代码证据与实际文件内容不匹配。")
+                proof_paths = {proof["path"] for proof in proofs}
+                if not cited_file_paths(text) & proof_paths or not cited_file_paths(reasons[category]) & proof_paths:
+                    raise AIReviewError("AI JSON 发现及类别依据必须引用已核实的代码路径。")
+                text += " " + " ".join(
+                    f"代码证据：{json.dumps(proof, ensure_ascii=False)}" for proof in proofs
+                )
             validated.append({"category": category, "text": text.strip()})
         return validated
 
     confirmed = findings("confirmed_findings", {"已确认", "修复", "风险"})
     pending = findings("pending_claims", {"待验证"})
+    if data["risk"] in {"P0", "P1", "P2"} and not confirmed:
+        raise AIReviewError("AI JSON 高风险结论缺少代码已确认的发现。")
     covered = {item["category"] for item in confirmed + pending}
     if any(status != "无" and category not in covered for category, status in statuses.items()):
         raise AIReviewError("AI JSON 审查结果有重点标记缺少对应发现或发行说明主张。")
@@ -1062,15 +1214,15 @@ def final_analysis_from_json(response: str) -> str:
     return "\n".join(lines)
 
 
-def call_final_ai(settings: dict, system_prompt: str, material: str) -> str:
+def call_final_ai(settings: dict, system_prompt: str, material: str, code_evidence: dict[str, str] | None = None) -> str:
     response = call_ai(settings, f"{system_prompt}\n\n{FINAL_JSON_OUTPUT_PROMPT}", material)
     try:
-        return final_analysis_from_json(response)
+        return final_analysis_from_json(response, code_evidence)
     except AIReviewError as first_error:
-        repair = f"{system_prompt}\n\n{FINAL_JSON_OUTPUT_PROMPT}\n\nThe prior response was invalid. Correct it and return JSON only."
+        repair = f"{system_prompt}\n\n{FINAL_JSON_OUTPUT_PROMPT}\n\nThe prior response was invalid ({first_error}). Correct it and return JSON only."
         retry_response = call_ai(settings, repair, material)
         try:
-            return final_analysis_from_json(retry_response)
+            return final_analysis_from_json(retry_response, code_evidence)
         except AIReviewError as second_error:
             raise AIReviewError(f"AI JSON 审查结果重试失败：{second_error}") from first_error
 
@@ -1095,6 +1247,32 @@ def cached_chunk_review(key: str) -> str | None:
     return record["analysis"].strip() or None
 
 
+def load_scheduler_waits() -> dict[str, int]:
+    try:
+        waits = json.loads(cached_chunk_review("scheduler-v1") or "{}")
+        if isinstance(waits, dict) and all(
+            isinstance(key, str) and type(count) is int and count >= 0
+            for key, count in waits.items()
+        ):
+            return waits
+    except (ValueError, TypeError):
+        pass
+    print("Ignoring invalid scheduler waiting-round cache; starting fresh.", flush=True)
+    return {}
+
+
+def validate_chunk_review(response: str, review_id: str) -> str:
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError as error:
+        raise AIReviewError("AI 分块结果不是完整 JSON。") from error
+    if (not isinstance(result, dict) or set(result) != {"review_id", "complete", "analysis"}
+            or result["review_id"] != review_id or result["complete"] is not True
+            or not isinstance(result["analysis"], str) or not result["analysis"].strip()):
+        raise AIReviewError("AI 分块结果缺少匹配的完成标记。")
+    return result["analysis"].strip()
+
+
 def save_chunk_review(key: str, analysis: str) -> None:
     REVIEW_CACHE.mkdir(parents=True, exist_ok=True)
     path = REVIEW_CACHE / f"{key}.json"
@@ -1107,7 +1285,7 @@ def fast_batch_id(repo: str, release: dict, previous_tag: str | None) -> str:
     return review_cache_key(repo, str(release.get("tag_name", "")), previous_tag or "")[:16]
 
 
-def parse_fast_batch_response(response: str, expected_ids: set[str]) -> dict[str, str] | None:
+def parse_fast_batch_response(response: str, expected_ids: set[str], evidence_by_id: dict[str, dict[str, str]] | None = None) -> dict[str, str] | None:
     matches = list(re.finditer(r"(?m)^--- REVIEW ([0-9a-f]{16}) ---$", response))
     if not matches or response[:matches[0].start()].strip():
         return None
@@ -1118,7 +1296,7 @@ def parse_fast_batch_response(response: str, expected_ids: set[str]) -> dict[str
         if review_id in results or not analysis:
             return None
         try:
-            results[review_id] = final_analysis_from_json(analysis)
+            results[review_id] = final_analysis_from_json(analysis, (evidence_by_id or {}).get(review_id))
         except AIReviewError:
             return None
     return results if set(results) == expected_ids else None
@@ -1154,7 +1332,11 @@ def ask_ai_fast_batch(settings: dict, candidates: list[dict]) -> dict[str, str] 
         "Return every requested id exactly once. If any input has a risk signal, incomplete evidence, or cannot be reviewed independently, "
         "state that within that input's review; never omit it."
     )
-    parsed = parse_fast_batch_response(call_ai(settings, f"{prompt}\n\n{FAST_BATCH_JSON_OUTPUT_PROMPT}", material), expected_ids)
+    evidence_by_id = {
+        fast_batch_id(item["repo"], item["release"], item["previous_tag"]):
+        review_code_evidence(item["diff"], item.get("linked_evidence", "")) for item in candidates
+    }
+    parsed = parse_fast_batch_response(call_ai(settings, f"{prompt}\n\n{FAST_BATCH_JSON_OUTPUT_PROMPT}", material), expected_ids, evidence_by_id)
     if parsed is None:
         print("Fast batch response failed validation; falling back to separate fast reviews.", flush=True)
     return parsed
@@ -1169,8 +1351,10 @@ def ask_ai(
     review: str = "full",
     historical_review: str = "",
     target_network: str | None = None,
+    linked_evidence: str = "",
 ) -> str:
     network_context = f"Operator target network: {target_network or 'not specified; do not assume mainnet.'}"
+    code_evidence = review_code_evidence(diff, linked_evidence)
     if review == "fast":
         print(f"Fast prechecking {repo} {release.get('tag_name')}.", flush=True)
         material = f"{network_context}\n\n{fast_review_material(repo, release, previous_tag, diff)}"
@@ -1179,7 +1363,7 @@ def ask_ai(
         prompt = f"{SYSTEM_PROMPT}\n\n{str(settings.get('prompt', ''))}"
         if historical_review:
             prompt += f"\n\n{HISTORICAL_REVIEW_PROMPT}"
-        return call_final_ai(settings, prompt, material)
+        return call_final_ai(settings, prompt, material, code_evidence)
     chunk_chars = settings.get("diff_chunk_chars", DIFF_CHUNK_CHARS)
     if type(chunk_chars) is not int or chunk_chars < 1:
         raise AIReviewError("AI 配置 diff_chunk_chars 必须是正整数。")
@@ -1202,7 +1386,7 @@ def ask_ai(
         prompt = f"{SYSTEM_PROMPT}\n\n{str(settings.get('prompt', ''))}"
         if historical_review:
             prompt += f"\n\n{HISTORICAL_REVIEW_PROMPT}"
-        return call_final_ai(settings, prompt, material)
+        return call_final_ai(settings, prompt, material, code_evidence)
 
     reviews = []
     notes = release_notes(release)
@@ -1227,13 +1411,30 @@ def ask_ai(
             "<untrusted_code_diff_chunk>", chunk, "</untrusted_code_diff_chunk>",
         ])
         cache_key = review_cache_key(
-            "chunk-v1", os.environ.get("AI_BACKEND", "openai_compatible").strip().lower(),
+            "chunk-v2", os.environ.get("AI_BACKEND", "openai_compatible").strip().lower(),
             str(settings.get("api_url", "")), str(settings.get("model", "")), chunk_prompt, material,
         )
-        analysis = cached_chunk_review(cache_key)
+        response = cached_chunk_review(cache_key)
+        try:
+            analysis = validate_chunk_review(response, cache_key) if response else None
+        except AIReviewError:
+            analysis = None
         if analysis is None:
-            analysis = call_ai(settings, chunk_prompt, material)
-            save_chunk_review(cache_key, analysis)
+            complete_prompt = (
+                f"{chunk_prompt}\nReturn only JSON with exactly review_id, complete, analysis. "
+                f"review_id must be {json.dumps(cache_key)}. complete must be true only after reviewing the entire segment. "
+                "analysis is a nonempty string. For each code finding include its exact file path and verbatim code snippets "
+                "supporting the behavior; the final synthesis must preserve them."
+            )
+            for attempt in range(2):
+                response = call_ai(settings, complete_prompt, material)
+                try:
+                    analysis = validate_chunk_review(response, cache_key)
+                    break
+                except AIReviewError:
+                    if attempt:
+                        raise
+            save_chunk_review(cache_key, response)
         else:
             print(f"Reusing verified diff chunk {number}/{len(chunks)} cache for {repo} {release.get('tag_name')}.", flush=True)
         reviews.append(f"## Chunk {number}/{len(chunks)}\n{analysis}")
@@ -1262,7 +1463,7 @@ def ask_ai(
     )
     if historical_review:
         synthesis_prompt += f"\n\n{HISTORICAL_REVIEW_PROMPT}"
-    return call_final_ai(settings, synthesis_prompt, material)
+    return call_final_ai(settings, synthesis_prompt, material, code_evidence)
 
 
 def risk_from(analysis: str) -> str:
@@ -1340,9 +1541,10 @@ def apply_explicit_release_declarations(analysis: str, release: dict) -> str:
 
 
 def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str]:
-    """Return a deterministic operator recommendation from AI evidence."""
+    """Keep upstream operator advice separate from code-risk severity."""
     risk = risk_from(analysis)
     statuses = highlight_statuses(analysis)
+    recommendation = explicit_upgrade_recommendation(release or {})
     hard_fork = explicit_hard_fork_notice(release or {})
     explicit_hard_fork = bool(hard_fork)
     activation = hard_fork[0] if hard_fork else ""
@@ -1372,8 +1574,13 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
             reason = "发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。"
     elif risk in {"P1", "P2"} or any(statuses.get(name) in {"修复", "风险"} for name in ("内存问题", "安全", "稳定性/数据")):
         advice, reason = "建议升级", "包含已确认的重要修复或风险，建议在维护窗口升级。"
+    elif recommendation:
+        advice, reason = "建议升级", "上游明确建议运营者升级，建议尽快安排维护窗口并核对适用条件；该声明不等同于已确认的重大代码风险。"
     else:
         advice, reason = "可暂缓", "未发现需要立即处理的重大变更。"
+
+    if recommendation:
+        reason += f" 上游升级建议，发行说明原文：「{recommendation}」"
 
     if release and release_channel(release) == "预发布版":
         if advice == "必须升级":
@@ -1381,7 +1588,7 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
         if advice == "需人工确认":
             if explicit_hard_fork and requires_upgrade:
                 return "预发布版声明待核实", f"{reason} 当前为预发布版，不应直接部署生产节点；立即核对{activation}及升级要求并跟进正式版。"
-            return "预发布版声明待核实", "预发布版中的重大声明尚未确认，不据此决定生产升级；等待正式版或更多证据。"
+            return "预发布版声明待核实", f"{reason} 预发布版中的重大声明尚未确认，不据此决定生产升级；等待正式版或更多证据。"
         if advice == "建议升级":
             return "预发布版生产暂缓", f"{reason} 当前为预发布版，生产升级建议等待正式版发布后再评估。"
         return "预发布版生产暂缓", "当前为预发布版，生产节点暂缓升级；正式版发布后再评估。"
@@ -1608,7 +1815,10 @@ def issue_conclusion(meta: dict, pending: list[tuple[str, str]]) -> str:
     if pending and meta.get("upgrade_advice") in {"需人工确认", "预发布版声明待核实"}:
         categories = "、".join(label for label, _ in pending)
         return f"发行说明涉及{categories}等重大声明，但本次代码差异未能确认这些变化。"
-    return meta.get("upgrade_reason", "AI 未提供升级理由。")
+    reason = meta.get("upgrade_reason", "AI 未提供升级理由。")
+    if quote := meta.get("upstream_upgrade_quote"):
+        reason = reason.replace(f" 上游升级建议，发行说明原文：「{quote}」", "")
+    return reason
 
 
 def issue_action_line(meta: dict) -> str:
@@ -1646,6 +1856,7 @@ def format_release(
     review: str = "full",
     changed_paths: set[str] | None = None,
     historical_paths: set[str] | None = None,
+    code_evidence: dict[str, str] | None = None,
 ) -> tuple[dict, str]:
     tag = release["tag_name"]
     analysis = apply_explicit_release_declarations(analysis, release)
@@ -1677,10 +1888,19 @@ def format_release(
         r"(?s)\*\*代码已确认的发现\*\*[:：]?(.*?)(?=\n\s*\*\*待核实的发行说明主张\*\*|\Z)",
         analysis,
     )
-    verified_finding_paths = sorted(
-        cited_file_paths(finding_section.group(1)) & allowed_paths if finding_section else set()
-    )
+    verified_finding_paths = set()
+    if finding_section:
+        for match in re.finditer(r"代码证据：", finding_section.group(1)):
+            try:
+                proof, _ = json.JSONDecoder().raw_decode(finding_section.group(1)[match.end():])
+            except json.JSONDecodeError:
+                continue
+            if (isinstance(proof, dict) and isinstance(proof.get("path"), str)
+                    and isinstance(proof.get("quote"), str)
+                    and code_quote_matches(proof["path"], proof["quote"], code_evidence or {})):
+                verified_finding_paths.add(proof["path"])
     hard_fork_notice = explicit_hard_fork_notice(release)
+    upgrade_quote = explicit_upgrade_recommendation(release)
     meta = {
         "coin": coin,
         "repo": repo,
@@ -1689,8 +1909,8 @@ def format_release(
         "comparison_start": previous_tag or "无更早 Release",
         "published_at": release.get("published_at", ""),
         "risk": risk,
-        "importance": importance(risk, highlights),
-        "conclusion": conclusion(risk, highlights),
+        "importance": "需关注" if upgrade_quote and risk == "P3" else importance(risk, highlights),
+        "conclusion": "需关注" if upgrade_quote and risk == "P3" else conclusion(risk, highlights),
         "upgrade_advice": advice,
         "upgrade_reason": advice_reason,
         "review": "快速预检" if review == "fast" else "完整审查",
@@ -1698,9 +1918,10 @@ def format_release(
         "highlight_statuses": highlight_statuses(analysis),
         "highlight_reasons": highlight_reasons,
         "verified_code_categories": verified_code_categories,
-        "verified_finding_paths": verified_finding_paths,
+        "verified_finding_paths": sorted(verified_finding_paths),
         "breaking_note_quote": breaking_note_quote(analysis, release),
         "hard_fork_notice": hard_fork_notice,
+        "upstream_upgrade_quote": upgrade_quote,
     }
     analysis_details = re.sub(r"(?m)^(?:风险级别|重点标记|重点标记依据)[：:].*(?:\n|$)", "", analysis).strip()
     analysis_details = re.sub(
@@ -2049,6 +2270,8 @@ def issue_body(
             conclusion_label = "需人工核实后再决定升级" if advice == "需人工确认" else advice
             lines.append(f"- **处置结论：** {conclusion_label}")
             lines.append(f"- **结论：** {issue_conclusion(meta, pending)}")
+            if meta.get("upstream_upgrade_quote"):
+                lines.append(f"- **上游升级建议（非代码风险结论）：** 发行说明原文：「{meta['upstream_upgrade_quote']}」")
             if confirmed:
                 lines.append("- **已确认的代码变化：**")
                 lines.extend(f"  {number}. **已确认 — {label}：** {reason}" for number, (label, reason) in enumerate(confirmed, 1))
@@ -2101,6 +2324,7 @@ def record_review_candidate(candidate: dict, analysis: str, new_entries: dict, p
         candidate["coin"], candidate["repo"], candidate["release"], candidate["previous_tag"],
         analysis, candidate["review"], changed_paths=candidate["changed_paths"],
         historical_paths=candidate["historical_paths"],
+        code_evidence=review_code_evidence(candidate["diff"], candidate.get("linked_evidence", "")),
     )
     new_entries.setdefault(candidate["coin"], {}).setdefault(candidate["repo"], []).append(formatted)
     processed.add((candidate["coin"], candidate["repo"], candidate["release"]["tag_name"]))
@@ -2117,6 +2341,7 @@ def review_fast_candidates(candidates: list[dict], new_entries: dict, processed:
             analysis = analyses.get(review_id) if analyses else ask_ai(
                 candidate["settings"], candidate["repo"], candidate["release"], candidate["previous_tag"],
                 candidate["diff"], "fast", candidate["historical_review"], candidate["target_network"],
+                linked_evidence=candidate.get("linked_evidence", ""),
             )
         except AIReviewError as error:
             if "JSON" not in str(error):
@@ -2126,6 +2351,7 @@ def review_fast_candidates(candidates: list[dict], new_entries: dict, processed:
             analysis = ask_ai(
                 candidate["settings"], candidate["repo"], candidate["release"], candidate["previous_tag"],
                 candidate["diff"], "full", candidate["historical_review"], candidate["target_network"],
+                linked_evidence=candidate.get("linked_evidence", ""),
             )
         if fast_batch_requires_full_review(analysis):
             print(f"Fast batch found a possible material issue in {candidate['repo']} {candidate['release']['tag_name']}; running full review.", flush=True)
@@ -2133,6 +2359,7 @@ def review_fast_candidates(candidates: list[dict], new_entries: dict, processed:
             analysis = ask_ai(
                 candidate["settings"], candidate["repo"], candidate["release"], candidate["previous_tag"],
                 candidate["diff"], "full", candidate["historical_review"], candidate["target_network"],
+                linked_evidence=candidate.get("linked_evidence", ""),
             )
         record_review_candidate(candidate, analysis, new_entries, processed)
 
@@ -2153,27 +2380,49 @@ def main() -> None:
     issue_history = github_issue_history() if should_read_github_issue_history() else None
     processed = reported_releases(issue_history)
     new_entries: dict[str, dict[str, list[tuple[dict, str]]]] = {}
-    for coin, repo, running_version, target_network, include_prereleases, override in watched:
+    waits = load_scheduler_waits()
+    queues = []
+    for item in watched:
+        coin, repo, running_version, target_network, include_prereleases, override = item
+        queue = {
+            "watch": item, "state_key": json.dumps(item[:5], separators=(",", ":")),
+            "pending": None, "attempted": False, "failed": False,
+        }
+        queues.append(queue)
         try:
             releases, previous = release_window_after_running_version(
                 repo, running_version, include_prereleases,
             )
+            queue["pending"] = []
+            for release in releases:
+                if (coin, repo, release["tag_name"]) not in processed:
+                    queue["pending"].append((release, previous))
+                previous = release["tag_name"]
+            print(f"Discovered {repo}: {len(queue['pending'])} unreviewed Release(s).", flush=True)
+        except Exception as error:
+            queue["pending"] = None
+            queue["failed"] = True
+            failures.append(f"{repo}: {error}")
+
+    def review_queue(queue: dict, limit: int) -> None:
+        nonlocal reviewed
+        coin, repo, running_version, target_network, include_prereleases, override = queue["watch"]
+        try:
             pending_fast: list[dict] = []
             repo_failed = False
 
             def flush_fast() -> None:
                 nonlocal pending_fast
-                review_fast_candidates(pending_fast, new_entries, processed)
+                candidates = pending_fast
                 pending_fast = []
+                if candidates:
+                    review_fast_candidates(candidates, new_entries, processed)
 
-            for release in releases:
-                key = (coin, repo, release["tag_name"])
-                if key in processed:
-                    previous = release["tag_name"]
-                    continue
-                if reviewed >= max_releases_per_run:
-                    break
+            for release, previous in queue["pending"][:limit]:
+                queue["pending"].pop(0)
+                release["_target_network"] = target_network
                 reviewed += 1
+                queue["attempted"] = True
                 try:
                     comparison_start = previous
                     historical_review = ""
@@ -2192,6 +2441,7 @@ def main() -> None:
                         ))
                         cumulative_fallback = bool(expected_tags) and (
                             not expected_tags.issubset(historical_tags) or unresolved_history
+                            or bool(historical_confirmed_paths(prerelease_history))
                         )
                         if cumulative_fallback:
                             comparison_start = release.get("_previous_stable_tag") or running_version
@@ -2215,12 +2465,12 @@ def main() -> None:
                         "diff": diff, "review": selected_review, "historical_review": historical_review,
                         "target_network": target_network, "changed_paths": changed_paths,
                         "historical_paths": historical_paths, "settings": ai_settings(config.get("ai", {}), override),
+                        "linked_evidence": linked_evidence,
                     }
                     if selected_review == "fast":
                         if pending_fast and pending_fast[0]["settings"] != candidate["settings"]:
                             flush_fast()
                         pending_fast.append(candidate)
-                        previous = release["tag_name"]
                         if len(pending_fast) >= fast_batch_size:
                             flush_fast()
                         continue
@@ -2228,19 +2478,52 @@ def main() -> None:
                     analysis = ask_ai(
                         candidate["settings"], repo, release, comparison_start, diff, selected_review,
                         historical_review, target_network=target_network,
+                        linked_evidence=linked_evidence,
                     )
-                except AIReviewError as error:
+                except Exception as error:
                     failures.append(f"{repo} {release['tag_name']}: {error}")
+                    try:
+                        flush_fast()
+                    except Exception as pending_error:
+                        failures.append(f"{repo} earlier releases: {pending_error}")
                     repo_failed = True
                     break
                 record_review_candidate(candidate, analysis, new_entries, processed)
-                previous = release["tag_name"]
             if not repo_failed:
                 flush_fast()
+            queue["failed"] = repo_failed
         except Exception as error:
+            queue["failed"] = True
             failures.append(f"{repo}: {error}")
-        if reviewed >= max_releases_per_run:
-            break
+
+    for protected_phase in (True, False):
+        active = [queue for queue in queues if queue["pending"] and not queue["failed"]]
+        if protected_phase:
+            active = [queue for queue in active if waits.get(queue["state_key"], 0) >= 3]
+            active.sort(key=lambda queue: -waits.get(queue["state_key"], 0))
+        else:
+            active.sort(key=lambda queue: len(queue["pending"]))
+        for queue in active:
+            remaining = max_releases_per_run - reviewed
+            if remaining <= 0:
+                break
+            limit = 1 if protected_phase else remaining
+            print(f"Scheduling {queue['watch'][1]}: {'protected slot' if protected_phase else 'shortest queue first'}.", flush=True)
+            review_queue(queue, limit)
+
+    next_waits = {}
+    for queue in queues:
+        key = queue["state_key"]
+        if queue["pending"] is None:
+            next_waits[key] = waits.get(key, 0)
+        elif queue["attempted"] or not queue["pending"]:
+            next_waits[key] = 0
+        else:
+            next_waits[key] = waits.get(key, 0) + 1
+    try:
+        save_chunk_review("scheduler-v1", json.dumps(next_waits))
+    except OSError as error:
+        failures.append(f"Scheduler waiting-round cache: {error}")
     for failure in failures:
         print(f"Check pending: {failure}", flush=True)
     set_workflow_output("failure_count", str(len(failures)))

@@ -3,6 +3,7 @@ import io
 import importlib.util
 import json
 import os
+import re
 import tempfile
 import unittest
 import urllib.error
@@ -189,7 +190,9 @@ class WatchReleaseTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             captured.append(json.loads(request.data.decode("utf-8")))
-            content = EMPTY_AI_REVIEW if len(captured) == 4 else f"Chunk finding {len(captured)}"
+            review_id = re.search(r'review_id must be "([0-9a-f]+)"', captured[-1]["messages"][0]["content"])
+            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": f"Chunk finding {len(captured)}"})
+                       if review_id else EMPTY_AI_REVIEW)
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         with patch.dict(os.environ, {"AI_API_KEY": "test-key"}), \
@@ -338,7 +341,9 @@ class WatchReleaseTests(unittest.TestCase):
 
         def urlopen(request, timeout):
             calls.append(json.loads(request.data.decode("utf-8")))
-            content = EMPTY_AI_REVIEW
+            review_id = re.search(r'review_id must be "([0-9a-f]+)"', calls[-1]["messages"][0]["content"])
+            content = (json.dumps({"review_id": review_id.group(1), "complete": True, "analysis": "No material finding"})
+                       if review_id else EMPTY_AI_REVIEW)
             return io.BytesIO(json.dumps({"choices": [{"message": {"content": content}}]}).encode())
 
         settings = {"api_url": "https://ai.example/v1", "model": "test", "diff_chunk_chars": 4}
@@ -353,24 +358,25 @@ class WatchReleaseTests(unittest.TestCase):
 
     def test_highlight_summary_marks_major_changes(self):
         analysis = (
+            "风险级别：P1\n"
             "重点标记：破坏性变更=待验证；硬分叉/共识=已确认；兼容性=待验证；"
             "内存问题=修复；安全=风险；稳定性/数据=无\n"
             "重点标记依据：破坏性变更=发行说明称移除旧配置格式，但差异未覆盖配置解析；"
-            "硬分叉/共识=src/consensus.rs 修改了区块验证规则；兼容性=发行说明称调整协议字段，差异未核实；"
-            "内存问题=src/cache.rs 修复缓存未释放；安全=src/rpc.rs 新增未校验输入；稳定性/数据=无"
+            "硬分叉/共识=P1：src/consensus.rs 修改了区块验证规则；兼容性=发行说明称调整协议字段，差异未核实；"
+            "内存问题=P1：src/cache.rs 修复缓存未释放；安全=P1：src/rpc.rs 新增未校验输入；稳定性/数据=无"
         )
         summary = watch.highlight_summary(analysis)
         self.assertIn("⚠️ **重大发行说明待核实：** 破坏性变更声明、兼容性声明", summary)
-        self.assertIn("重大共识变更**（已确认）", summary)
+        self.assertIn("共识/区块有效性差异**（已确认）", summary)
         self.assertIn("✅ **内存问题修复**", summary)
         self.assertIn("安全**（风险）", summary)
         self.assertNotIn("稳定性/数据", summary)
         self.assertIn("⚠️", summary)
         reasons = watch.highlight_reason_summary(analysis)
         self.assertIn("**破坏性变更：** 发行说明称移除旧配置格式，但差异未覆盖配置解析", reasons)
-        self.assertIn("**硬分叉/共识：** src/consensus.rs 修改了区块验证规则", reasons)
-        self.assertIn("**内存问题：** src/cache.rs 修复缓存未释放", reasons)
-        self.assertIn("**安全：** src/rpc.rs 新增未校验输入", reasons)
+        self.assertIn("**硬分叉/共识：** P1：src/consensus.rs 修改了区块验证规则", reasons)
+        self.assertIn("**内存问题：** P1：src/cache.rs 修复缓存未释放", reasons)
+        self.assertIn("**安全：** P1：src/rpc.rs 新增未校验输入", reasons)
         self.assertIn("重点标记", watch.SYSTEM_PROMPT)
         self.assertIn("memory leaks", watch.SYSTEM_PROMPT)
         self.assertIn("chunk-review summaries", watch.SYSTEM_PROMPT)
@@ -384,15 +390,15 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("omit categories marked 无", watch.SYSTEM_PROMPT)
         self.assertIn("Do not repeat the release tag as a heading", watch.SYSTEM_PROMPT)
         hard_fork = analysis.replace(
-            "硬分叉/共识=src/consensus.rs 修改了区块验证规则",
-            "硬分叉/共识=硬分叉：激活高度 123 会使旧节点拒绝新区块",
+            "硬分叉/共识=P1：src/consensus.rs 修改了区块验证规则",
+            "硬分叉/共识=P1：硬分叉：激活高度 123 会使旧节点拒绝新区块",
         )
         self.assertIn("硬分叉**（已确认）", watch.highlight_summary(hard_fork))
         _, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v1"}, "v0",
             f"风险级别：P1\n{analysis}\n### v1\n1. Note contains {{{{repo}}}}.",
         )
-        self.assertIn(f"- **重点标记：** {summary}", report)
+        self.assertIn(f"- **优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：** {summary}", report)
         self.assertIn("#### v1 · 正式版 · 完整审查", report)
         self.assertIn("<!-- watch-repo: owner/repo -->", report)
         self.assertNotIn("\n### v1\n", report)
@@ -423,7 +429,7 @@ class WatchReleaseTests(unittest.TestCase):
             )
 
         required, _ = watch.upgrade_advice(analysis(
-            "P2", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+            "P1", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
         ))
         manual, _ = watch.upgrade_advice(analysis(
             "P3", "破坏性变更=待验证；硬分叉/共识=无；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
@@ -442,7 +448,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         meta, report = watch.format_release(
             "coin", "owner/repo", {"tag_name": "v2"}, "v1", analysis(
-                "P2", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
+                "P1", "破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无",
             ),
         )
         self.assertEqual(meta["upgrade_advice"], "必须升级")
@@ -450,7 +456,7 @@ class WatchReleaseTests(unittest.TestCase):
 
     def test_prerelease_is_labeled_and_not_recommended_for_production(self):
         analysis = (
-            "风险级别：P2\n"
+            "风险级别：P1\n"
             "重点标记：破坏性变更=无；硬分叉/共识=已确认；兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n"
             "重点标记依据：破坏性变更=无；硬分叉/共识=共识变更：src/consensus.rs 修改了区块验证规则；"
             "兼容性=无；内存问题=无；安全=无；稳定性/数据=无\n1. 共识规则已变更。"
@@ -537,15 +543,12 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("## tari", body)
         release_summary = body[body.index("### `v2`"):]
         self.assertIn("### `v2` · 完整审查", release_summary)
-        self.assertIn(
-            "优先关注：**\n  1. ⚠️ 破坏性变更声明待核实\n  2. 重大共识变更声明待核实",
-            release_summary,
-        )
+        self.assertNotIn("优先关注：**", release_summary)
         self.assertIn("处置结论：** 需人工核实后再决定升级", release_summary)
         self.assertIn("发行说明涉及破坏性变更、共识变更、安全等重大声明", release_summary)
         self.assertIn("待核实 — 共识变更：** 发行说明称‘side-chain claimable burn 需 canonical script 验证’", release_summary)
         self.assertIn("发行说明未声明硬分叉", release_summary)
-        self.assertLess(release_summary.index("优先关注："), release_summary.index("处置结论："))
+        self.assertLess(release_summary.index("处置结论："), release_summary.index("待核实的发行说明主张："))
         self.assertIn("待核实 — 安全：** 发行说明称‘移除了私钥 UTXO 导出，避免泄漏 spend key’（#8102）", release_summary)
         self.assertLess(release_summary.index("处置结论："), release_summary.index("待核实的发行说明主张："))
         self.assertLess(release_summary.index("待核实的发行说明主张："), release_summary.index("下一步："))
@@ -821,7 +824,7 @@ class WatchReleaseTests(unittest.TestCase):
                 self.assertNotIn("Notes for v", report)
                 self.assertNotIn("src/one.rs", report)
                 self.assertNotIn("<!-- watch-release:", report)
-                self.assertEqual(report.count("- **重点标记：** 无"), 3)
+                self.assertEqual(report.count("- **优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：** 无"), 3)
                 self.assertEqual(report.count("1. Finding for v"), 3)
                 self.assertIn("one continuous numbering sequence across both sections", watch.SYSTEM_PROMPT)
                 self.assertEqual(watch.reported_releases(), {
