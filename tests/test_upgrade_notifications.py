@@ -109,6 +109,38 @@ class UpgradeNotificationTests(unittest.TestCase):
         self.assertEqual(meta["upgrade_advice"], "预发布版生产暂缓")
         self.assertFalse(watch.release_requires_notification(meta))
 
+    def test_geth_postponed_testnet_fork_does_not_trigger_stale_upgrade_reminder(self):
+        postponed = {
+            "tag_name": "v1.17.10",
+            "name": "Soil Reducer",
+            "body": (
+                "This is a quick release that postpones the Amsterdam fork on the Hoodi testnet, "
+                "previously scheduled for Oct 26, 2026, 17:42:48 UTC. "
+                "Hoodi node operators running v1.17.9 must upgrade before then. "
+                "A new date will be set in a future release; other networks are unaffected."
+            ),
+        }
+        for network in ("mainnet", "testnet"):
+            with self.subTest(network=network):
+                self.assertEqual(
+                    watch.explicit_upgrade_recommendation({**postponed, "_target_network": network}), "",
+                )
+
+        scheduled = {
+            "tag_name": "v1.17.9",
+            "body": (
+                "This release enables the Amsterdam fork on the Hoodi testnet.\n\n"
+                "This release is recommended for all users running their nodes on the Hoodi testnet."
+            ),
+        }
+        self.assertEqual(
+            watch.explicit_upgrade_recommendation({**scheduled, "_target_network": "testnet"}),
+            "This release is recommended for all users running their nodes on the Hoodi testnet.",
+        )
+        self.assertEqual(
+            watch.explicit_upgrade_recommendation({**scheduled, "_target_network": "mainnet"}), "",
+        )
+
     def test_screenshot_batch_distinguishes_conditional_and_strong_upgrade_advice(self):
         aleo = reviewed_entry(risk="P2", note=ALEO_NOTE)
         alph = reviewed_entry(coin="alephium", risk="P2", category="稳定性/数据", status="修复", note=OPERATOR_NOTE, tag="v4.7.2")

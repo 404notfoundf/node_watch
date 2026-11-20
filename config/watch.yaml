@@ -39,6 +39,11 @@ coins:
     running_version: v4.11.0
     network: mainnet
     include_prereleases: false
+#  eth:
+#    repo: ethereum/go-ethereum
+#    running_version: v1.17.10 # 请填写矿池当前实际运行的 Geth 版本 tag
+#    network: mainnet
+#    include_prereleases: false
 #  alephium:
 #    repo: alephium/alephium
 #    running_version: v4.7.1

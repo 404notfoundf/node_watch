@@ -108,6 +108,31 @@ class CodeEvidencePipelineTests(unittest.TestCase):
             self.assertNotIn("untrusted_input", saved)
             self.assertNotIn("evidence_id", saved)
 
+    def test_comment_only_and_short_quotes_get_targeted_repair_guidance(self):
+        for quote in ("// comment-only evidence", "foo();"):
+            with self.subTest(quote=quote):
+                calls = []
+                attempts = {}
+                def request(settings, prompt, material):
+                    calls.append((prompt, material))
+                    if "review_id must be" not in prompt:
+                        return self.synthesis_response()
+                    review_id = re.search(r'review_id must be "([0-9a-f]+)"', prompt).group(1)
+                    attempts[review_id] = attempts.get(review_id, 0) + 1
+                    if "Diff chunk: 1/2" in material and attempts[review_id] == 1:
+                        return json.dumps({
+                            "review_id": review_id, "complete": True,
+                            "analysis": code_finding(quote=quote),
+                        })
+                    return self.chunk_response(prompt, material)
+
+                with patch.object(watch, "REVIEW_CACHE", self.cache / str(len(quote))), \
+                        patch.object(watch, "call_ai", side_effect=request), redirect_stdout(io.StringIO()):
+                    self.run_review()
+                retry_prompt = calls[1][0]
+                self.assertIn("Replace every comment-only or too-short quote", retry_prompt)
+                self.assertIn("verbatim, non-comment code snippet", retry_prompt)
+
     def test_persistently_invalid_chunk_evidence_is_not_cached_or_synthesized(self):
         with patch.object(watch, "call_ai", side_effect=lambda settings, prompt, material: self.chunk_response(prompt, material, bad=True)) as request, \
                 redirect_stdout(io.StringIO()):
@@ -278,6 +303,54 @@ class CodeEvidencePipelineTests(unittest.TestCase):
             result = watch.ask_ai({"diff_chunk_chars": len(NODE_DIFF)}, "o/r", {"tag_name": "v2"}, "v1", diff)
         self.assertGreater(len(calls), 2)
         self.assertIn("ordinary_call();", result)
+
+    def test_rust_attributes_and_dereference_expressions_are_code_evidence(self):
+        path = "cli/src/commands/start.rs"
+        evidence = watch.review_code_evidence(
+            f"diff --git a/{path} b/{path}\n"
+            f"+++ b/{path}\n@@ -1 +1,3 @@\n"
+            "+#[tokio::main]\n+*target_ptr = start_node();\n+unsafe { *target_ptr = start_node(); }\n"
+        )
+        for quote in ("#[tokio::main]", "*target_ptr = start_node();", "unsafe { *target_ptr = start_node(); }"):
+            with self.subTest(quote=quote):
+                watch.validate_code_proof({"path": path, "quote": quote}, evidence, "test")
+
+    def test_comment_only_block_quote_is_rejected_but_not_treated_as_rust_code(self):
+        quote = "/* explanatory comment\n * still only a comment\n */"
+        evidence = watch.review_code_evidence(
+            "diff --git a/src/start.rs b/src/start.rs\n+++ b/src/start.rs\n@@ -1 +1,3 @@\n"
+            "+/* explanatory comment\n+ * still only a comment\n+ */\n"
+        )
+        with self.assertRaisesRegex(watch.AIReviewError, "\u4ec5\u4e3a\u6ce8\u91ca"):
+            watch.validate_code_proof({"path": "src/start.rs", "quote": quote}, evidence, "test")
+
+    def test_rust_attribute_survives_four_chunk_review_and_cache(self):
+        path, quote = "cli/src/commands/start.rs", "#[tokio::main]"
+        diff = NODE_DIFF.replace("src/node.rs", path).replace("RemoteExecute(input);", quote)
+        chunk_chars = len(diff)
+        diff += "".join(DOC_DIFF.replace("notes.md", f"notes-{number}.md") for number in range(3))
+        def request(settings, prompt, material):
+            if "review_id must be" in prompt:
+                review_id = re.search(r'review_id must be "([0-9a-f]+)"', prompt).group(1)
+                analysis = code_finding(path, quote) if "Diff chunk: 1/4" in material else json.loads(EMPTY_AI_REVIEW)
+                return json.dumps({"review_id": review_id, "complete": True, "analysis": analysis})
+            analysis = code_finding(path, quote)
+            analysis["confirmed_findings"][0]["evidence"] = [{"evidence_id": "code-1"}]
+            return json.dumps(analysis)
+
+        logs = io.StringIO()
+        with patch.object(watch, "call_ai", side_effect=request) as ai, redirect_stdout(logs):
+            for _ in range(2):
+                result = watch.ask_ai(
+                    {"diff_chunk_chars": chunk_chars}, "aleo-labs-protocol/snarkOS",
+                    {"tag_name": "v4.12.0"}, "v4.11.0", diff,
+                )
+                self.assertIn(quote, result)
+                self.assertIn(path, result)
+        self.assertEqual(ai.call_count, 6)
+        self.assertEqual(len(list(self.cache.glob("*.json"))), 4)
+        self.assertIn("Reusing verified diff chunk 1/4", logs.getvalue())
+        self.assertNotIn("Invalid result", logs.getvalue())
 
     def test_diagnostics_identify_reason_and_position_without_quote_content(self):
         for proof, evidence, reason in (

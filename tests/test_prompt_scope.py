@@ -78,11 +78,17 @@ class PromptScopeTests(unittest.TestCase):
                 self.assertTrue(requests)
                 for prompt in requests:
                     self.assertIn(scope, prompt)
+                    self.assertLess(prompt.index(scope), prompt.index(watch.CUSTOM_REVIEW_PROMPT_RULE))
                     self.assertNotIn("GLOBAL-CUSTOM-SCOPE", prompt)
                     self.assertTrue(all(other not in prompt for other in scopes.values() if other != scope))
                     if "review_id must be" not in prompt:
                         self.assertIn("EVIDENCE GATES", prompt)
                     self.assertNotIn("validator_node_mr", prompt)
+
+    def test_dependency_prompt_uses_code_evidence_without_requiring_release_note_linkage(self):
+        self.assertIn("release-note linkage is useful context, not a requirement", watch.CHUNK_REVIEW_PROMPT)
+        self.assertIn("A version bump or release-note claim alone is not code evidence", watch.CHUNK_REVIEW_PROMPT)
+        self.assertIn("manifest-only change", watch.CHUNK_REVIEW_PROMPT)
 
     def test_fast_batch_uses_the_current_repository_prompt_and_builtin_gates(self):
         settings = watch.ai_settings({"prompt": "GLOBAL-CUSTOM-SCOPE"}, {"prompt": "ALPH-LOCAL-SCOPE"})
@@ -99,6 +105,7 @@ class PromptScopeTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         prompt = ai.call_args.args[1]
         self.assertIn("ALPH-LOCAL-SCOPE", prompt)
+        self.assertLess(prompt.index("ALPH-LOCAL-SCOPE"), prompt.index(watch.CUSTOM_REVIEW_PROMPT_RULE))
         self.assertNotIn("GLOBAL-CUSTOM-SCOPE", prompt)
         self.assertIn("EVIDENCE GATES", prompt)
         self.assertNotIn("validator_node_mr", prompt)
