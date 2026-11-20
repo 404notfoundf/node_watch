@@ -59,7 +59,7 @@ class ReviewRegressionTests(unittest.TestCase):
         meta, report = watch.format_release("alephium", "alephium/alephium", release, "v4.7.1", watch.final_analysis_from_json(EMPTY_AI_REVIEW), review=mode)
         issue = watch.issue_body({"alephium": {"alephium/alephium": [(meta, report)]}})
         self.assertEqual(mode, "full")
-        self.assertEqual(meta["upgrade_advice"], "建议升级")
+        self.assertEqual(meta["upgrade_advice"], "强烈建议升级")
         self.assertEqual(meta["importance"], "需关注")
         self.assertEqual(meta["conclusion"], "需关注")
         self.assertEqual(meta["risk"], "P3")
@@ -75,14 +75,18 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertTrue(watch.release_requires_notification(meta))
 
     def test_similar_operator_recommendations_trigger_full_review(self):
-        notes = (
+        strong_notes = (
             ALEPHIUM_UPGRADE_NOTE,
-            "This release is recommended for mining pools.",
             "Highly recommended for pool operators and miners.",
             "We strongly recommend that all node operators upgrade to this version.",
+            "Upgrading is highly recommended.",
+            "强烈建议矿池和节点运营者升级到本版本。",
+        )
+        notes = (
+            *strong_notes,
+            "This release is recommended for mining pools.",
             "Node operators are encouraged to upgrade their nodes.",
             "We advise all users to update to the latest release.",
-            "Upgrading is highly recommended.",
             "This is a recommended update for node operators.",
             "This is an important update for mining pools.",
             "Critical release for node operators.",
@@ -90,7 +94,6 @@ class ReviewRegressionTests(unittest.TestCase):
             "All node operators should upgrade.",
             "Validators must upgrade their nodes.",
             "Please upgrade your nodes to this release.",
-            "强烈建议矿池和节点运营者升级到本版本。",
             "推荐所有节点运营者更新。",
             "这是面向矿池的重要更新。",
             "矿池务必升级节点。",
@@ -100,7 +103,7 @@ class ReviewRegressionTests(unittest.TestCase):
                 release = {"tag_name": "v2", "_target_network": "mainnet", "body": note}
                 self.assertEqual(watch.review_mode("auto", release, ROUTINE_DIFF), "full")
                 advice, reason = watch.upgrade_advice(watch.final_analysis_from_json(EMPTY_AI_REVIEW), release)
-                self.assertEqual(advice, "建议升级")
+                self.assertEqual(advice, "强烈建议升级" if note in strong_notes else "建议升级")
                 self.assertIn(note, reason)
 
     def test_non_operator_or_negative_recommendations_do_not_trigger(self):
@@ -144,7 +147,7 @@ class ReviewRegressionTests(unittest.TestCase):
             ("## Mainnet\n\nAll node operators should upgrade.", "mainnet", "建议升级"),
             ("## Testnet\n\nAll node operators should upgrade.", "testnet", "建议升级"),
             ("Mainnet node operators should upgrade.", "", "可暂缓"),
-            (ALEPHIUM_UPGRADE_NOTE, "", "建议升级"),
+            (ALEPHIUM_UPGRADE_NOTE, "", "强烈建议升级"),
             ("## Testnet\n\nNo need to upgrade.\n\n## Mainnet\n\nAll node operators should upgrade.", "mainnet", "建议升级"),
         )
         for note, network, expected in cases:
@@ -160,7 +163,7 @@ class ReviewRegressionTests(unittest.TestCase):
             (base.replace("风险级别：P3", "风险级别：P0"), "必须升级"),
             (base.replace("风险级别：P3", "风险级别：待人工复核"), "需人工确认"),
             (base.replace("兼容性=无", "兼容性=待验证", 1), "需人工确认"),
-            (base.replace("风险级别：P3", "风险级别：P2"), "建议升级"),
+            (base.replace("风险级别：P3", "风险级别：P2"), "强烈建议升级"),
         ):
             with self.subTest(expected=expected, analysis=analysis):
                 advice, reason = watch.upgrade_advice(analysis, release)

@@ -468,12 +468,12 @@ def explicit_upgrade_recommendation(release: dict) -> str:
         if not notice_applies_to_network(context, release):
             continue
         if re.search(
-            r"\b(?:not|never)\s+(?:(?:a|currently|yet|highly|strongly)\s+)*(?:recommended|advised|required|needed|necessary)\b|"
+            r"\b(?:not|never)\s+(?:(?:a|currently|yet|highly|strongly)\s+)*(?:recommend(?:ed)?|advis(?:e|ed)|encourag(?:e|ed)|required|needed|necessary)\b|"
             r"\b(?:not|never|avoid(?:ing)?|postpon(?:e|ing)|delay(?:ing)?)\s+(?:upgrad(?:e|ing)|updat(?:e|ing))\b|"
-            r"\b(?:do|does|should|must|need)\s+not\s+(?:recommend|upgrade|update)\b|"
-            r"\bdon't\s+(?:recommend|upgrade|update)\b|\bno\s+(?:need|requirement)\s+to\s+(?:upgrade|update)\b|"
+            r"\b(?:do|does|should|must|need)\s+not\s+(?:(?:highly|strongly)\s+)?(?:recommend|advise|encourage|upgrade|update)\b|"
+            r"\bdon't\s+(?:(?:highly|strongly)\s+)?(?:recommend|advise|encourage|upgrade|update)\b|\bno\s+(?:need|requirement)\s+to\s+(?:upgrade|update)\b|"
             r"\bno\s+(?:upgrade|update)\s+(?:is\s+)?(?:required|needed|necessary)\b|"
-            r"\boptional\s+(?:upgrade|update)\b|(?:不|暂不)(?:建议|推荐)|(?:无需|不必|不要|暂不|暂缓|推迟)(?:.{0,20})(?:升级|更新)",
+            r"\boptional\s+(?:upgrade|update)\b|(?:不|暂不)(?:强烈|高度)?(?:建议|推荐)|(?:无需|不必|不要|暂不|暂缓|推迟)(?:.{0,20})(?:升级|更新)",
             text, re.IGNORECASE,
         ):
             continue
@@ -494,6 +494,15 @@ def explicit_upgrade_recommendation(release: dict) -> str:
             continue
         return quote
     return ""
+
+
+def upstream_upgrade_advice(quote: str) -> str:
+    text = re.sub(r"[*_`]", "", normalize_quote(quote))
+    strong = re.search(
+        r"\b(?:highly|strongly)\s+(?:recommend(?:ed|s)?|advis(?:e[ds]?)|encourag(?:e[ds]?))\b|"
+        r"(?:强烈|高度)(?:建议|推荐)", text, re.IGNORECASE,
+    )
+    return "强烈建议升级" if strong else "建议升级"
 
 
 def format_highlight_reasons(reasons: dict[str, str]) -> str:
@@ -1738,11 +1747,12 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
         else:
             reason = "发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。"
     elif risk == "P1":
-        advice, reason = "建议升级", "存在已确认的 P1 级重大影响，建议尽快核对当前节点的适用条件并安排处理；升级前核对配置及兼容性，不将条件性影响泛化为所有节点的强制升级要求。"
+        advice, reason = upstream_upgrade_advice(recommendation), "存在已确认的 P1 级重大影响，建议尽快核对当前节点的适用条件并安排处理；升级前核对配置及兼容性，不将条件性影响泛化为所有节点的强制升级要求。"
     elif recommendation:
-        advice, reason = "建议升级", "上游明确建议运营者升级，建议尽快安排维护窗口并核对适用条件；该声明不等同于已确认的重大代码风险。"
+        advice = upstream_upgrade_advice(recommendation)
+        reason = f"上游明确{advice}，请核对当前节点的适用条件并尽快安排维护窗口；该声明不等同于已确认的重大代码风险。"
     elif risk == "P2":
-        advice, reason = "建议升级", "存在 P2 级变化或修复；先核对适用平台、节点模式及配置，受影响时再安排维护窗口，不属于强制升级要求。"
+        advice, reason = "按需升级", "存在 P2 级变化或修复；先核对适用平台、节点模式及配置，受影响时再安排维护窗口，不属于强制升级要求。"
     elif any(status != "无" for status in statuses.values()):
         advice, reason = "可暂缓", "仅发现低影响变化或修复，不构成强制升级要求；可按实际需求安排更新，升级前核对相关配置及调用方式。"
     else:
@@ -1758,7 +1768,7 @@ def upgrade_advice(analysis: str, release: dict | None = None) -> tuple[str, str
             if explicit_hard_fork and requires_upgrade:
                 return "预发布版声明待核实", f"{reason} 当前为预发布版，不应直接部署生产节点；立即核对{activation}及升级要求并跟进正式版。"
             return "预发布版声明待核实", f"{reason} 预发布版中的重大声明尚未确认，不据此决定生产升级；等待正式版或更多证据。"
-        if advice == "建议升级":
+        if advice in {"建议升级", "强烈建议升级", "按需升级"}:
             return "预发布版生产暂缓", f"{reason} 当前为预发布版，生产升级建议等待正式版发布后再评估。"
         return "预发布版生产暂缓", "当前为预发布版，生产节点暂缓升级；正式版发布后再评估。"
     return advice, reason
@@ -2000,6 +2010,10 @@ def issue_action_line(meta: dict) -> str:
         return f"生产节点暂缓升级到 `{tag}`；正式版发布后再按正式版差异评估。"
     if advice == "必须升级":
         return f"尽快核对升级条件并安排节点升级到 `{tag}`；部署完成后，将配置中的 `running_version` 更新为 `{tag}`。"
+    if advice == "强烈建议升级":
+        return f"上游强烈建议运营者升级；请尽快核对适用条件并安排维护窗口升级到 `{tag}`；上游推荐本身不等同于紧急风险警报，部署完成后再更新 `running_version`。"
+    if advice == "按需升级":
+        return f"先确认当前节点是否受影响；受影响时建议在维护窗口升级到 `{tag}`，否则可按需安排；部署完成后再更新 `running_version`。"
     if advice == "建议升级":
         if meta.get("risk") == "P1":
             return f"建议尽快核对当前节点的适用条件并安排处理或升级到 `{tag}`；升级前核对兼容性及配置，部署完成后再更新 `running_version`。"
@@ -2343,12 +2357,31 @@ def release_notification_reasons(meta: dict) -> list[str]:
             icon = "✅" if status == "修复" else "🚨"
             reasons.append(f"{icon} **{severity.group(1)} 已确认 — {label}：** {display_highlight_reason(reason)}")
     if meta.get("release_channel") == "正式版" and (quote := meta.get("upstream_upgrade_quote")):
-        reasons.append(f"🔔 **运营升级提醒（非紧急风险警报）：** 上游建议升级，发行说明原文：「{quote}」")
+        reasons.append(f"🔔 **运营升级提醒（非紧急风险警报）：** 上游{upstream_upgrade_advice(quote)}，发行说明原文：「{quote}」")
     return reasons
 
 
 def release_requires_notification(meta: dict) -> bool:
     return bool(release_notification_reasons(meta))
+
+
+def release_notification_summary(meta: dict) -> str:
+    reasons = release_notification_reasons(meta)
+    if not reasons:
+        return "未触发主动提醒；先核对是否受影响" if meta.get("upgrade_advice") == "按需升级" else "未触发主动提醒"
+    labels = []
+    for reason in reasons:
+        if reason.startswith("🚨🚨 **目标网络硬分叉升级要求：**"):
+            label = "目标网强制升级提醒"
+        elif reason.startswith("⚠️ **重大 Breaking Changes 声明：**"):
+            label = "重大上游声明提醒"
+        elif reason.startswith("🔔 **运营升级提醒（非紧急风险警报）：**"):
+            label = "上游强烈推荐（运营提醒）" if upstream_upgrade_advice(meta["upstream_upgrade_quote"]) == "强烈建议升级" else "上游推荐（运营提醒）"
+        else:
+            label = "代码风险警报"
+        if label not in labels:
+            labels.append(label)
+    return "；".join(labels)
 
 
 def batch_digest(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> str:
@@ -2424,9 +2457,9 @@ def issue_body(
         for coin, _repo, meta in releases
         if (reasons := release_notification_reasons(meta))
     ]
-    lines.extend(["", "**本轮处置概览（全部已完成版本）：**", "", "| 币种 | 版本 | 风险 | 处置结论 | 主动提醒条件 |", "| --- | --- | --- | --- | --- |"])
+    lines.extend(["", "**本轮处置概览（全部已完成版本）：**", "", "| 币种 | 版本 | 风险 | 处置结论 | 提醒说明 |", "| --- | --- | --- | --- | --- |"])
     for coin, _repo, meta in releases:
-        cells = [coin, f"`{meta['tag']}`", meta.get("risk", "未标注"), meta.get("upgrade_advice", "需人工确认"), "达到" if release_requires_notification(meta) else "未达到"]
+        cells = [coin, f"`{meta['tag']}`", meta.get("risk", "未标注"), meta.get("upgrade_advice", "需人工确认"), release_notification_summary(meta)]
         lines.append("| " + " | ".join(cell.replace("|", "\\|").replace("\n", " ").replace("\r", " ") for cell in cells) + " |")
     if triggered:
         lines.extend(["", "**通知触发版本：**"])
@@ -2453,8 +2486,7 @@ def issue_body(
                 lines.extend(f"  {number}. {item}" for number, item in enumerate(priority, 1))
             conclusion_label = "需人工核实后再决定升级" if advice == "需人工确认" else advice
             lines.append(f"- **处置结论：** {conclusion_label}")
-            notification_status = "达到（触发原因见顶部）" if release_requires_notification(meta) else "未达到；低风险或普通变化不主动 @"
-            lines.append(f"- **主动提醒条件：** {notification_status}")
+            lines.append(f"- **提醒说明：** {release_notification_summary(meta)}")
             lines.append(f"- **结论：** {issue_conclusion(meta, pending)}")
             if meta.get("upstream_upgrade_quote"):
                 lines.append(f"- **上游升级建议（非代码风险结论）：** 发行说明原文：「{meta['upstream_upgrade_quote']}」")

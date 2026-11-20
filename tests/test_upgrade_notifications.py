@@ -46,7 +46,7 @@ class UpgradeNotificationTests(unittest.TestCase):
             ):
                 with self.subTest(risk=risk, category=category, status=status):
                     meta, report = reviewed_entry(risk=risk, category=category, status=status)
-                    self.assertEqual(meta["upgrade_advice"], "建议升级" if risk == "P2" else "可暂缓")
+                    self.assertEqual(meta["upgrade_advice"], "按需升级" if risk == "P2" else "可暂缓")
                     self.assertFalse(watch.release_requires_notification(meta))
                     self.assertNotIn("已确认的重要修复", report)
                     self.assertNotIn("必须升级", watch.issue_action_line(meta))
@@ -60,9 +60,69 @@ class UpgradeNotificationTests(unittest.TestCase):
 
     def test_p2_advice_and_action_are_conditional(self):
         meta, _ = reviewed_entry(coin="xbt", risk="P2", category="稳定性/数据", status="修复")
+        self.assertEqual(meta["upgrade_advice"], "按需升级")
         self.assertIn("适用", meta["upgrade_reason"])
         self.assertIn("受影响", watch.issue_action_line(meta))
         self.assertFalse(watch.release_requires_notification(meta))
+
+    def test_strong_upstream_recommendations_are_distinct_from_ordinary_advice(self):
+        for note, expected in (
+            (OPERATOR_NOTE, "强烈建议升级"),
+            ("We strongly recommend that node operators upgrade.", "强烈建议升级"),
+            ("Upgrading is **highly recommended** for node operators.", "强烈建议升级"),
+            ("We strongly advise all node operators to upgrade.", "强烈建议升级"),
+            ("Node operators are strongly encouraged to upgrade.", "强烈建议升级"),
+            ("强烈建议矿池和节点运营者升级。", "强烈建议升级"),
+            ("高度推荐矿池升级到这个版本。", "强烈建议升级"),
+            ("Node operators should upgrade.", "建议升级"),
+            ("This is an important update for node operators.", "建议升级"),
+            ("This highly optimized release is recommended for node operators.", "建议升级"),
+        ):
+            with self.subTest(note=note):
+                meta, report = reviewed_entry(risk="P2", note=note)
+                self.assertEqual(meta["upgrade_advice"], expected)
+                self.assertEqual(meta["risk"], "P2")
+                self.assertIn(expected, report)
+                self.assertTrue(watch.release_requires_notification(meta))
+                self.assertIn("维护窗口", watch.issue_action_line(meta))
+                self.assertNotIn("必须升级", watch.issue_action_line(meta))
+                expected_reminder = "上游强烈推荐（运营提醒）" if expected == "强烈建议升级" else "上游推荐（运营提醒）"
+                self.assertEqual(watch.release_notification_summary(meta), expected_reminder)
+
+    def test_strong_advice_uses_existing_scope_negation_and_prerelease_gates(self):
+        for note in (
+            "Testnet only. Highly recommended for node operators.",
+            "Strongly recommended for wallet users only.",
+            "We do not strongly recommend that node operators upgrade.",
+            "We don't strongly advise node operators to upgrade.",
+            "We never strongly recommend that node operators upgrade.",
+            "Node operators are not strongly encouraged to upgrade.",
+            "This release is not highly recommended for node operators.",
+            "不强烈建议节点运营者升级。",
+            "```text\nHighly recommended for node operators.\n```\n\nRoutine release.",
+        ):
+            with self.subTest(note=note):
+                meta, _ = reviewed_entry(risk="P2", note=note)
+                self.assertEqual(meta["upgrade_advice"], "按需升级")
+                self.assertFalse(watch.release_requires_notification(meta))
+        meta, _ = reviewed_entry(risk="P2", note=OPERATOR_NOTE, tag="v2-rc.1")
+        self.assertEqual(meta["upgrade_advice"], "预发布版生产暂缓")
+        self.assertFalse(watch.release_requires_notification(meta))
+
+    def test_screenshot_batch_distinguishes_conditional_and_strong_upgrade_advice(self):
+        aleo = reviewed_entry(risk="P2", note=ALEO_NOTE)
+        alph = reviewed_entry(coin="alephium", risk="P2", category="稳定性/数据", status="修复", note=OPERATOR_NOTE, tag="v4.7.2")
+        next_alph = watch.format_release("alephium", "org/alephium", {"tag_name": "v4.7.3"}, "v4.7.2", watch.final_analysis_from_json(EMPTY_AI_REVIEW))
+        entries = {"aleo": {"org/aleo": [aleo]}, "alephium": {"org/alephium": [alph, next_alph]}}
+        body = watch.issue_body(entries)
+        self.assertIn("| 币种 | 版本 | 风险 | 处置结论 | 提醒说明 |", body)
+        self.assertIn("| aleo | `v4.13.1` | P2 | 按需升级 | 未触发主动提醒；先核对是否受影响 |", body)
+        self.assertIn("| alephium | `v4.7.2` | P2 | 强烈建议升级 | 上游强烈推荐（运营提醒） |", body)
+        self.assertIn("| alephium | `v4.7.3` | P3 | 可暂缓 | 未触发主动提醒 |", body)
+        self.assertIn("提醒说明：** 上游强烈推荐（运营提醒）", body)
+        self.assertIn(OPERATOR_NOTE, body)
+        self.assertNotIn("🚨", body)
+        self.assertEqual(watch.release_keys(watch.notification_entries(entries)), [("alephium", "org/alephium", "v4.7.2")])
 
     def test_p1_consumer_compatibility_change_does_not_force_node_upgrade(self):
         meta, _ = reviewed_entry(risk="P1")
@@ -74,6 +134,20 @@ class UpgradeNotificationTests(unittest.TestCase):
         meta, _ = reviewed_entry(risk="P0", category="稳定性/数据", status="风险")
         self.assertEqual(meta["upgrade_advice"], "必须升级")
         self.assertTrue(watch.release_requires_notification(meta))
+        self.assertEqual(watch.release_notification_summary(meta), "代码风险警报")
+
+    def test_combined_notification_summary_preserves_reasons_without_duplicates(self):
+        meta, _ = reviewed_entry(risk="P1", category="安全", status="风险", note=OPERATOR_NOTE, extras=(
+            ("稳定性/数据", "修复", "P1", "存在已确认的数据风险修复"),
+        ))
+        meta["breaking_note_quote"] = "An existing API endpoint was removed."
+        self.assertEqual(
+            watch.release_notification_summary(meta),
+            "重大上游声明提醒；代码风险警报；上游强烈推荐（运营提醒）",
+        )
+        self.assertEqual(meta["upgrade_advice"], "强烈建议升级")
+        self.assertEqual(meta["risk"], "P1")
+        self.assertIn("上游推荐本身", watch.issue_action_line(meta))
 
     def test_p1_consensus_category_without_network_deadline_is_not_mandatory(self):
         meta, _ = reviewed_entry(risk="P1", category="硬分叉/共识")
@@ -120,9 +194,9 @@ class UpgradeNotificationTests(unittest.TestCase):
             values = dict(call.args for call in output.call_args_list)
             body = watch.base64.b64decode(values["issue_body_base64"]).decode("utf-8")
         overview = body.split("**通知触发版本：**")[0]
-        self.assertIn("| aleo | `v4.13.1` | P3 | 可暂缓 | 未达到 |", overview)
-        self.assertIn("| xbt | `v29.5` | P2 | 建议升级 | 未达到 |", overview)
-        self.assertIn("| alephium | `v4.7.2` | P3 | 建议升级 | 达到 |", overview)
+        self.assertIn("| aleo | `v4.13.1` | P3 | 可暂缓 | 未触发主动提醒 |", overview)
+        self.assertIn("| xbt | `v29.5` | P2 | 按需升级 | 未触发主动提醒；先核对是否受影响 |", overview)
+        self.assertIn("| alephium | `v4.7.2` | P3 | 强烈建议升级 | 上游强烈推荐（运营提醒） |", overview)
         triggers = body.split("**通知触发版本：**")[1].split("\n## aleo\n")[0]
         self.assertIn(OPERATOR_NOTE, triggers)
         self.assertIn("运营升级提醒（非紧急风险警报）", triggers)
@@ -166,6 +240,7 @@ class UpgradeNotificationTests(unittest.TestCase):
         triggers = body.split("**通知触发版本：**")[1].split("\n## aleo\n")[0]
         self.assertLess(triggers.index("硬分叉"), triggers.index("运营升级提醒"))
         self.assertIn("123456", triggers)
+        self.assertEqual(watch.release_notification_summary(meta), "目标网强制升级提醒；上游推荐（运营提醒）")
 
 
 if __name__ == "__main__":
