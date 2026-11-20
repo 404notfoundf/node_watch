@@ -1,4 +1,4 @@
-name: 节点版本审查
+name: 版本更新监控
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-# GitHub Release Watch
+# 版本更新监控
 
 用 GitHub Actions 监控公开仓库的 Release，比较版本间的代码差异，并调用 AI 审阅矿池和节点可能受到的影响。
 
@@ -68,7 +68,7 @@ coins:
 4. 在 **Settings → Actions → General → Workflow permissions** 允许工作流 token 写入仓库内容。工作流还使用 `issues: write` 创建 Issue，以及 Pages 部署权限发布网页。
 5. 在 **Settings → Environments** 新建 `release-poll-cooldown`，把 **Wait timer** 设为 15 分钟。
 6. 在 **Settings → Secrets and variables → Actions → Variables** 添加 `RELEASE_POLL_COOLDOWN_ENABLED`，值设为 `true`。
-7. 打开 **Actions → 节点版本审查 → Run workflow**，手动启动一次。
+7. 打开 **Actions → 版本更新监控 → Run workflow**，手动启动一次。
 
 ### 轮询间隔与暂停
 
@@ -77,7 +77,7 @@ coins:
 这是**完成后再等待 15 分钟**，不是每个整点的固定 15 分钟调度。Environment 等待不占 runner，但实际启动仍受 GitHub runner 排队影响。
 
 - **暂停**：将 `RELEASE_POLL_COOLDOWN_ENABLED` 改为 `false`；当前正在等待的 Environment job 仍需在 Actions 页面手动取消。
-- **恢复**：改回 `true`，再手动运行一次“节点版本审查”。
+- **恢复**：改回 `true`，再手动运行一次“版本更新监控”。
 
 不要重复手动启动。额外运行只会进入同一并发队列，可能替换已排队的运行，并不会让轮询更快。
 
@@ -127,7 +127,7 @@ Issue 顶部的**处置概览**列出本轮全部已完成版本的风险、升�
 
 ### 上游升级建议
 
-`auto` 会对明确建议运营者升级、或面向矿池和节点的“重要／关键更新”等声明使用完整审查。常见表述包括：
+`auto` 会对明确建议运营者升级、或面向矿池和节点的“重要／关键更新”等声明使用完整评估。常见表述包括：
 
 - `highly/strongly recommended`、`recommend upgrading`；
 - `encouraged/advised to upgrade`、`should/must upgrade`；
@@ -161,13 +161,13 @@ Issue 顶部的**处置概览**列出本轮全部已完成版本的风险、升�
 
 | 模式 | 行为 |
 | --- | --- |
-| `auto` | 默认模式。所有版本按风险信号选择快速预检或完整审查。 |
+| `auto` | 默认模式。所有版本按风险信号选择快速预检或完整评估。 |
 | `fast` | 强制快速预检，只发送发行说明、变更文件清单及本地扫描发现的可疑片段。 |
 | `full` | 强制审查完整 diff；大差异分块审查后汇总。 |
 
 报告会注明实际模式。快速预检不会宣称未发送的代码安全；本地启发式扫描只覆盖已知风险特征，不等同完整安全审查。
 
-`auto` 在以下情况使用完整审查：
+`auto` 在以下情况使用完整评估：
 
 - 发行说明涉及共识、硬分叉、认证凭据、密钥清零、交易 gossip 封禁、内存泄漏/OOM、数据库损坏或重置等重大风险。
 - 新增命令执行、外部下载、动态加载、疑似密钥外传代码或 CI 权限。
@@ -180,7 +180,7 @@ Issue 顶部的**处置概览**列出本轮全部已完成版本的风险、升�
 
 - 每个版本有独立编号，不互相借用证据。
 - 缺项、重复、格式异常或输入过长时，退回逐版本预检。
-- 高风险版本和完整审查不会批量化。
+- 高风险版本和完整评估不会批量化。
 
 `review.max_releases_per_run` 默认 `3`，限制单轮进入准备／审核的版本总数，**包含失败尝试**。剩余版本留到下一轮。
 

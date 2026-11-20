@@ -112,7 +112,7 @@ SENSITIVE_PATH_RE = re.compile(
 )
 ISSUE_KEYS_RE = re.compile(r"(?m)^<!-- watch-release-keys: ([A-Za-z0-9_-]+) -->\r?$")
 REPORT_COIN_RE = re.compile(r"^### (.+)$")
-REPORT_TAG_RE = re.compile(r"^#### ([^ `]+?)(?: · (?:正式版|预发布版) · (?:完整审查|快速预检))?$")
+REPORT_TAG_RE = re.compile(r"^#### ([^ `]+?)(?: · (?:正式版|预发布版) · (?:完整评估|完整审查|快速预检))?$")
 REPORT_REPO_RE = re.compile(r"(?m)^- 仓库：\[`([^`]+)`\]")
 REPORT_HIDDEN_REPO_RE = re.compile(r"(?m)^<!-- watch-repo: ([^ ]+) -->$")
 RELEASE_NOTE_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+)")
@@ -2109,7 +2109,7 @@ def format_release(
         "conclusion": "需关注" if upgrade_quote and risk == "P3" else conclusion(risk, highlights),
         "upgrade_advice": advice,
         "upgrade_reason": advice_reason,
-        "review": "快速预检" if review == "fast" else "完整审查",
+        "review": "快速预检" if review == "fast" else "完整评估",
         "highlights": highlights,
         "highlight_statuses": highlight_statuses(analysis),
         "highlight_reasons": highlight_reasons,
@@ -2316,7 +2316,7 @@ def append_report_batch(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -
     now = datetime.now(timezone.utc)
     report = REPORTS / f"{now.strftime('%Y-%m-%dT%H-%M-%S-%fZ')}.md"
     lines = [
-        "# 节点版本审查报告",
+        "# 版本更新报告",
         "",
         f"## 检查批次 {now.strftime('%Y-%m-%d %H:%M:%S UTC')}",
     ]
@@ -2330,7 +2330,7 @@ def append_report_batch(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -
             lines.extend(["", body, ""])
     lines.extend([
         "", "---", "",
-        "审查范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整审查”标识为准。",
+        "评估范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整评估”标识为准。",
     ])
     with report.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(lines) + "\n")
@@ -2427,7 +2427,7 @@ def issue_title(entries: dict[str, dict[str, list[tuple[dict, str]]]]) -> str:
             preview += f" 等 {len(versions)} 个版本"
         summaries.append(f"{coin} {preview}")
     count = f"（共 {len(releases)} 个版本）" if len(versions_by_coin) > 1 else ""
-    prefix = "节点版本审查："
+    prefix = "版本更新报告："
     preview = "；".join(summaries)
     preview = preview[:240 - len(prefix) - len(count)].rstrip("、；")
     return f"{prefix}{preview}{count}"
@@ -2466,9 +2466,9 @@ def issue_body(
     lines = [
         f"<!-- watch-release-batch: {batch_digest(entries)} -->",
         f"<!-- watch-release-keys: {encoded_keys} -->",
-        "# 节点版本审查摘要",
+        "# 版本更新摘要",
         "",
-        f"本轮完成 **{len(releases)} 个版本审查**，涉及 **{len(entries)} 个币种：** "
+        f"本轮完成 **{len(releases)} 个版本评估**，涉及 **{len(entries)} 个币种：** "
         + "、".join(
             f"{coin}（{sum(len(items) for items in repos.values())} 个版本）"
             for coin, repos in sorted(entries.items())
@@ -2501,7 +2501,7 @@ def issue_body(
         for _coin, _repo, meta in coin_releases:
             advice = meta.get("upgrade_advice", "需人工确认")
             channel = f" · {meta['release_channel']}" if meta.get("release_channel") == "预发布版" else ""
-            lines.append(f"### `{meta['tag']}`{channel} · {meta.get('review', '完整审查')}")
+            lines.append(f"### `{meta['tag']}`{channel} · {meta.get('review', '完整评估')}")
             confirmed, pending, priority = issue_evidence(meta)
             if priority:
                 lines.append("- **优先关注：**")

@@ -66,7 +66,16 @@ class WatchReleaseTests(unittest.TestCase):
 
             report_path = publish_site.publish_report(report_dir, site_dir, "123", "1", 180)
             rendered = (site_dir / report_path).read_text(encoding="utf-8")
+            listing = (site_dir / "release-reports/index.html").read_text(encoding="utf-8")
+            home = (site_dir / "index.html").read_text(encoding="utf-8")
 
+        self.assertIn("<title>版本更新报告 · 2026-11-13 03:33:55 UTC</title>", rendered)
+        self.assertIn("<strong>版本更新监控</strong>", listing)
+        self.assertIn("<title>版本更新报告</title>", listing)
+        self.assertIn("<h1>版本更新报告</h1>", listing)
+        self.assertIn("<h1>版本更新监控</h1>", home)
+        self.assertIn("<title>版本更新监控</title>", home)
+        self.assertIn("查看版本更新报告", home)
         self.assertIn("<h4>v1.0.0</h4>", rendered)
         self.assertNotIn("watch-release:", rendered)
         self.assertNotIn("<script>", rendered)
@@ -397,7 +406,7 @@ class WatchReleaseTests(unittest.TestCase):
             f"风险级别：P1\n{analysis}\n### v1\n1. Note contains {{{{repo}}}}.",
         )
         self.assertIn(f"- **优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：** {summary}", report)
-        self.assertIn("#### v1 · 正式版 · 完整审查", report)
+        self.assertIn("#### v1 · 正式版 · 完整评估", report)
         self.assertIn("<!-- watch-repo: owner/repo -->", report)
         self.assertNotIn("\n### v1\n", report)
         self.assertNotIn(f"- **标记依据：** {reasons}", report)
@@ -469,7 +478,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertEqual(stable["release_channel"], "正式版")
         self.assertEqual(meta["upgrade_advice"], "预发布版重大事项")
         self.assertEqual(stable["upgrade_advice"], "必须升级")
-        self.assertIn("#### v2-pre.1 · 预发布版 · 完整审查", report)
+        self.assertIn("#### v2-pre.1 · 预发布版 · 完整评估", report)
         self.assertIn("不建议直接用于生产升级", report)
         self.assertIn("`v2-pre.1` · 预发布版", issue)
         self.assertIn("不建议直接将 `v2-pre.1` 用作生产升级版本", issue)
@@ -502,7 +511,9 @@ class WatchReleaseTests(unittest.TestCase):
             body = watch.issue_body(entries, include_mentions=True)
             title = watch.issue_title(entries)
 
-        self.assertIn("3 个版本审查", body)
+        self.assertTrue(title.startswith("版本更新报告："))
+        self.assertIn("# 版本更新摘要\n", body)
+        self.assertIn("3 个版本评估", body)
         self.assertIn("涉及 **2 个币种：** coin-b（2 个版本）、tari（1 个版本）", body)
         self.assertIn("## coin-b", body)
         self.assertIn("## tari", body)
@@ -512,7 +523,7 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("`v2`", body)
         self.assertLess(body.index("## coin-b"), body.index("## tari"))
         self.assertIn("内存问题修复", body)
-        self.assertIn("完整审查", body)
+        self.assertIn("完整评估", body)
         self.assertIn("建议升级", body)
         self.assertIn("下一步：** 建议尽快核对当前节点的适用条件", body)
         self.assertIn("1. **已确认 — 内存问题修复：** `src/cache.rs` 修复缓存未释放", body)
@@ -540,7 +551,7 @@ class WatchReleaseTests(unittest.TestCase):
 
         self.assertIn("## tari", body)
         release_summary = body[body.index("### `v2`"):]
-        self.assertIn("### `v2` · 完整审查", release_summary)
+        self.assertIn("### `v2` · 完整评估", release_summary)
         self.assertNotIn("优先关注：**", release_summary)
         self.assertIn("处置结论：** 需人工核实后再决定升级", release_summary)
         self.assertIn("发行说明涉及破坏性变更、共识变更、安全等重大声明", release_summary)
@@ -550,6 +561,21 @@ class WatchReleaseTests(unittest.TestCase):
         self.assertIn("待核实 — 安全：** 发行说明称‘移除了私钥 UTXO 导出，避免泄漏 spend key’（#8102）", release_summary)
         self.assertLess(release_summary.index("处置结论："), release_summary.index("待核实的发行说明主张："))
         self.assertLess(release_summary.index("待核实的发行说明主张："), release_summary.index("下一步："))
+
+    def test_report_review_labels_preserve_deduplication_and_historical_sections(self):
+        headings = ["#### v1"] + [
+            f"#### v1 · {channel} · {review}"
+            for channel in ("正式版", "预发布版")
+            for review in ("完整审查", "完整评估", "快速预检")
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(watch, "REPORTS", Path(temp_dir)):
+            for heading in headings:
+                with self.subTest(heading=heading):
+                    section = f"{heading}\n\n- 仓库：[`owner/repo`](https://github.com/owner/repo)"
+                    report = f"# 版本更新报告\n\n### coin\n\n{section}\n"
+                    (watch.REPORTS / "report.md").write_text(report, encoding="utf-8")
+                    self.assertEqual(watch.reported_releases(), {("coin", "owner/repo", "v1")})
+                    self.assertEqual(watch.release_review_sections(report, "coin"), {"v1": section})
 
     def test_issue_markers_are_the_persistent_release_deduplication_state(self):
         releases = [("tari", "tari-project/tari", "v6.4.0")]
@@ -563,6 +589,11 @@ class WatchReleaseTests(unittest.TestCase):
             watch.REPORTS = Path(temp_dir)
             try:
                 self.assertEqual(watch.reported_releases(issues), set(releases))
+                for heading in ("节点版本审查摘要", "客户端版本审查摘要", "版本更新摘要"):
+                    with self.subTest(heading=heading):
+                        titled = [dict(issue, body=f"# {heading}\n" + issue["body"] + "\n通知对象：@alice\n\n## 完整报告\n") for issue in issues]
+                        self.assertEqual(watch.reported_releases(titled), set(releases))
+                        self.assertEqual(watch.notified_releases(titled), set(releases))
             finally:
                 watch.REPORTS = original_reports
 
@@ -739,6 +770,7 @@ class WatchReleaseTests(unittest.TestCase):
 
     def test_workflow_publishes_report_before_issue_and_does_not_commit_reports(self):
         workflow = watch.yaml.safe_load((SCRIPT.parents[1] / "workflows" / "watch-releases.yml").read_text(encoding="utf-8"))
+        self.assertEqual(workflow["name"], "版本更新监控")
         watch_job = workflow["jobs"]["watch"]
         publish_job = workflow["jobs"]["publish-report"]
         watch_steps = watch_job["steps"]
@@ -837,6 +869,7 @@ class WatchReleaseTests(unittest.TestCase):
                 report_files = [path for path in watch.REPORTS.glob("*.md") if path.name != "index.md"]
                 self.assertEqual(len(report_files), 1)
                 report = report_files[0].read_text(encoding="utf-8")
+                self.assertTrue(report.startswith("# 版本更新报告\n"))
                 self.assertLess(report.index("### A 币种"), report.index("### B 币种"))
                 self.assertLess(report.index("#### v1"), report.index("#### v2"))
                 self.assertNotIn("#### a/node", report)
