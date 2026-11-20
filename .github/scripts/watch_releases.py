@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -610,18 +611,39 @@ def historical_confirmed_paths(historical_review: str) -> set[str]:
 def release_diff(repo: str, previous_tag: str | None, tag: str) -> tuple[str, set[str]]:
     if not previous_tag:
         return "No earlier published Release is available for comparison.", set()
-    with tempfile.TemporaryDirectory(prefix="release-watch-") as directory:
-        checkout = Path(directory)
+    directory = tempfile.TemporaryDirectory(prefix="release-watch-")
+    checkout = Path(directory.name)
+    stage = "initialization"
+    try:
         run("git", "init", "--quiet", str(checkout))
+        stage = "remote setup"
         run("git", "remote", "add", "origin", f"https://github.com/{repo}.git", cwd=checkout)
         for ref in (previous_tag, tag):
-            run("git", "fetch", "--quiet", "--no-tags", "--depth=1", "origin", f"refs/tags/{ref}:refs/tags/{ref}", cwd=checkout)
+            stage = f"fetch {ref}"
+            run("git", "fetch", "--quiet", "--no-auto-maintenance", "--no-tags", "--depth=1", "origin", f"refs/tags/{ref}:refs/tags/{ref}", cwd=checkout)
+        stage = "diff"
         diff = run("git", "diff", "--find-renames", "--find-copies", previous_tag, tag, cwd=checkout)
+        stage = "changed-path listing"
         changed_paths = name_status_paths(run(
             "git", "diff", "--name-status", "--find-renames", "--find-copies", "-z",
             previous_tag, tag, cwd=checkout,
         ))
         return diff, changed_paths
+    except Exception:
+        print(f"Git diff failed: {repo} {previous_tag} -> {tag} during {stage}.", flush=True)
+        traceback.print_exc()
+        raise
+    finally:
+        # Cleanup must not discard valid evidence or replace the original Git error.
+        for attempt, delay in enumerate((0, 0.2, 0.5, 1), 1):
+            if delay:
+                time.sleep(delay)
+            try:
+                directory.cleanup()
+                break
+            except OSError as error:
+                if attempt == 4:
+                    print(f"Warning: temporary Git checkout cleanup failed after 4 attempts: {checkout}: {error}", flush=True)
 
 
 def ai_settings(defaults: dict, override: dict) -> dict:
