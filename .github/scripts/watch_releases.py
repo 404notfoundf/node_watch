@@ -302,8 +302,23 @@ def github_json(path: str):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    attempts = 4
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if error.code not in {408, 500, 502, 503, 504} or attempt == attempts:
+                raise
+            error.close()
+            failure = f"HTTP {error.code}"
+        except (TimeoutError, ConnectionError, urllib.error.URLError, http.client.HTTPException) as error:
+            if attempt == attempts:
+                raise
+            failure = type(error).__name__
+        wait = 5 * (2 ** (attempt - 1))
+        print(f"GitHub API {path}: {failure}; retry {attempt}/{attempts - 1} after {wait}s.", flush=True)
+        time.sleep(wait)
 
 
 def release_window_after_running_version(

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -191,6 +192,47 @@ class ReleaseSchedulerTests(unittest.TestCase):
         self.assertEqual(self.queries, ["A", "B", "C"])
         self.assertEqual(self.completed, [("B", "v1"), ("C", "v1"), ("C", "v2")])
         self.assertEqual(self.waiting_for("A"), 2)
+
+    def test_transient_github_502_recovers_without_waiting_for_next_round(self):
+        failed = False
+
+        def response(request, timeout):
+            nonlocal failed
+            if "/A/repo/" in request.full_url and not failed:
+                failed = True
+                raise watch.urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", None, None)
+            releases = [{"tag_name": "v1"}, {"tag_name": "v0"}] if request.full_url.endswith("page=1") else []
+            return io.BytesIO(json.dumps(releases).encode())
+
+        with patch.object(watch, "release_window_after_running_version", side_effect=self.real_window), \
+                patch.object(watch.urllib.request, "urlopen", side_effect=response), \
+                patch.object(watch.time, "sleep") as sleep:
+            self.run_round()
+        self.assertEqual(self.completed, [("A", "v1"), ("B", "v1"), ("C", "v1")])
+        sleep.assert_called_once_with(5)
+
+    def test_exhausted_github_502_does_not_record_failed_coin_and_next_round_recovers(self):
+        failing = True
+
+        def response(request, timeout):
+            if failing and "/A/repo/" in request.full_url:
+                raise watch.urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", None, None)
+            releases = [{"tag_name": "v1"}, {"tag_name": "v0"}] if request.full_url.endswith("page=1") else []
+            return io.BytesIO(json.dumps(releases).encode())
+
+        with patch.object(watch, "release_window_after_running_version", side_effect=self.real_window), \
+                patch.object(watch.urllib.request, "urlopen", side_effect=response) as request, \
+                patch.object(watch.time, "sleep") as sleep:
+            with self.assertRaises(RuntimeError):
+                self.run_round()
+            self.assertEqual(self.completed, [("B", "v1"), ("C", "v1")])
+            self.assertNotIn(("A", "A/repo", "v1"), self.processed)
+            self.assertEqual(sum("/A/repo/" in call.args[0].full_url for call in request.call_args_list), 4)
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20])
+            failing = False
+            self.run_round()
+        self.assertEqual(self.completed, [("A", "v1")])
+        self.assertIn(("A", "A/repo", "v1"), self.processed)
 
     def test_multiple_protected_coins_get_oldest_first_without_exceeding_limit(self):
         self.seed_waits(A=5, B=3, C=4)
