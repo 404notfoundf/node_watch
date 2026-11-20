@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>版本更新报告 · 2026-11-20 09:45:23 UTC</title><style>
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #18212f; background: #f4f6f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.65; }
+header { background: #fff; border-bottom: 1px solid #d8dee4; }
+.container { width: min(100% - 2rem, 960px); margin: 0 auto; }
+header .container { padding: 1rem 0; }
+main { padding: 1.25rem 0 3rem; }
+.card { background: #fff; border: 1px solid #d8dee4; border-radius: 12px; padding: clamp(1rem, 3vw, 2rem); overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.3; scroll-margin-top: 1rem; }
+h1 { font-size: clamp(1.55rem, 5vw, 2rem); }
+h2 { margin-top: 2rem; border-bottom: 1px solid #d8dee4; padding-bottom: .35rem; }
+a { color: #0969da; }
+img { max-width: 100%; height: auto; }
+table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { border: 1px solid #d8dee4; padding: .45rem .65rem; text-align: left; }
+pre { max-width: 100%; overflow-x: auto; padding: 1rem; background: #f6f8fa; border-radius: 8px; }
+code { overflow-wrap: anywhere; }
+.meta { color: #59636e; font-size: .92rem; }
+.report-list { padding: 0; list-style: none; }
+.report-list li { padding: .8rem 0; border-bottom: 1px solid #d8dee4; }
+.report-list span { display: block; color: #59636e; font-size: .92rem; }
+@media (max-width: 600px) { .container { width: min(100% - 1rem, 960px); } main { padding-top: .5rem; } .card { border-radius: 8px; } }
+</style></head>
+<body><header><div class="container"><a href="../../index.html">← 报告列表</a></div></header><main class="container"><article class="card"><h1>版本更新报告</h1>
+<h2>检查批次 2026-11-20 09:45:23 UTC</h2>
+<h3>aleo</h3>
+<h4>v4.12.0 · 正式版 · 完整评估</h4>
+<p>&lt;!-- watch-repo: aleo-labs-protocol/snarkOS --&gt;</p>
+<ul>
+<li><strong>优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：</strong> ⚠️ <strong>重大发行说明待核实：</strong> 共识/硬分叉声明</li>
+<li><strong>处置建议：</strong> 需人工确认 · 重点关注</li>
+<li><strong>建议理由：</strong> 发行说明或 AI 结论存在未核实的重大项，升级前需要人工确认。 上游升级建议，发行说明原文：「All mainnet validators and node operators need to upgrade before the activation height.」</li>
+</ul>
+<h5>AI 审查</h5>
+<p><strong>代码已确认的发现</strong></p>
+<ol>
+<li><strong>已确认 — 破坏性变更：</strong> 编译期 <code>slipstream-plugins</code> 特性与 <code>--slipstream-config</code> 启动参数被整体移除（<code>Cargo.toml</code>、<code>cli/src/commands/start.rs</code>），此前使用 Slipstream 插件构建并在启动配置使用该参数的节点升级后将无法启动，需删除该参数；<code>history</code>、<code>history-staking-rewards</code> 仅保留为空别名以兼容旧构建命令，仅影响显式使用该插件功能的节点。 代码证据：{&quot;path&quot;: &quot;Cargo.toml&quot;, &quot;quote&quot;: &quot;slipstream-plugins = [ &quot;snarkos-node/slipstream-plugins&quot;, &quot;snarkos-cli/slipstream-plugins&quot; ]&quot;} 代码证据：{&quot;path&quot;: &quot;cli/src/commands/start.rs&quot;, &quot;quote&quot;: &quot;    #[cfg(feature = &quot;slipstream-plugins&quot;)]\n    #[clap(long = &quot;slipstream-config&quot;, value_name = &quot;PATH&quot;, verbatim_doc_comment)]\n    pub slipstream_configs: Vec&lt;PathBuf&gt;,&quot;} 代码证据：{&quot;path&quot;: &quot;Cargo.toml&quot;, &quot;quote&quot;: &quot;history = []\nhistory-staking-rewards = []&quot;}</li>
+<li><strong>已确认 — 安全：</strong> 修复：开启 REST 的验证者/客户端节点在 broadcast 且 <code>check_transaction=true</code> 时，基线在 <code>node/rest/src/routes.rs</code> 的异步处理中内联执行 <code>check_transaction_basic</code> 重校验，可长期占用异步运行时线程；目标版本将该校验移入 <code>spawn_blocking</code> 并让验证许可随任务持有，<code>node/rest/src/lib.rs</code> 的排队信号量按并发上限封顶、满载直接返回 429，限制远程请求可堆积的等待队列。 代码证据：{&quot;path&quot;: &quot;node/rest/src/routes.rs&quot;, &quot;quote&quot;: &quot;            let res = rest.ledger.check_transaction_basic(&amp;tx, None, &amp;mut rand::rng()).map_err(|err| {&quot;} 代码证据：{&quot;path&quot;: &quot;node/rest/src/routes.rs&quot;, &quot;quote&quot;: &quot;        let tx = if check_transaction {\n            let verification_slot = if tx.is_execute() {\n                rest.verification_slots.executions.acquire().await?\n            } else {\n                rest.verification_slots.deploys.acquire().await?\n            };&quot;} 代码证据：{&quot;path&quot;: &quot;node/rest/src/routes.rs&quot;, &quot;quote&quot;: &quot;            match tokio::task::spawn_blocking(move || {&quot;} 代码证据：{&quot;path&quot;: &quot;node/rest/src/routes.rs&quot;, &quot;quote&quot;: &quot;                let <em>verification_slot = verification_slot;\n                ledger.check_transaction_basic(&amp;tx, None, &amp;mut rand::rng()).map(|()| tx)\n            })\n            .await\n            {\n                Ok(Ok(tx)) =&gt; tx,&quot;} 代码证据：{&quot;path&quot;: &quot;node/rest/src/lib.rs&quot;, &quot;quote&quot;: &quot;    fn new(concurrent_limit: usize) -&gt; Self {\n        Self {\n            concurrent: Arc::new(Semaphore::new(concurrent_limit)),\n            queued: Arc::new(Semaphore::new(concurrent_limit.saturating_mul(2))),\n        }\n    }&quot;} 代码证据：{&quot;path&quot;: &quot;node/rest/src/lib.rs&quot;, &quot;quote&quot;: &quot;        let queued = self\n            .queued\n            .clone()\n            .try_acquire_owned()\n            .map_err(|</em>| RestError::too_many_requests(anyhow::anyhow!(&quot;Too many verifications in progress&quot;)))?;&quot;}</li>
+<li><strong>已确认 — 兼容性：</strong> 对外 Prometheus 指标命名与单位口径变更：<code>node/metrics/src/names.rs</code> 中 <code>snarkos_tcp_tasks_total</code> 改为语义不同的 <code>snarkos_tcp_queued_inbound_messages</code>，并引入 <code>snarkos_consensus_block_lag_secs</code>、<code>snarkos_consensus_advance_to_next_block_secs</code> 等秒单位名称；依赖旧指标名的监控面板与告警查询需更新，仅影响监控，不影响节点运行。 代码证据：{&quot;path&quot;: &quot;node/metrics/src/names.rs&quot;, &quot;quote&quot;: &quot;    pub const BLOCK_LAG: &amp;str = &quot;snarkos_consensus_block_lag_secs&quot;;&quot;} 代码证据：{&quot;path&quot;: &quot;node/metrics/src/names.rs&quot;, &quot;quote&quot;: &quot;    pub const TCP_TASKS: &amp;str = &quot;snarkos_tcp_tasks_total&quot;;&quot;} 代码证据：{&quot;path&quot;: &quot;node/metrics/src/names.rs&quot;, &quot;quote&quot;: &quot;    pub const QUEUED_INBOUND_MESSAGES: &amp;str = &quot;snarkos_tcp_queued_inbound_messages&quot;;&quot;} 代码证据：{&quot;path&quot;: &quot;node/metrics/src/names.rs&quot;, &quot;quote&quot;: &quot;    pub const ADVANCE_TO_NEXT_BLOCK_SECS: &amp;str = &quot;snarkos_consensus_advance_to_next_block_secs&quot;;&quot;}</li>
+<li><strong>已确认 — 稳定性/数据：</strong> 修复：验证者 BFT 存储区分可取回传输与仅记录为 aborted 的传输 ID（<code>node/bft/src/helpers/storage.rs</code>、<code>node/bft/storage-service/src/memory.rs</code>、<code>node/bft/src/primary.rs</code>），避免证书在提案/同步中引用仅记录为 aborted 的传输后，节点在提交时无法提供所承诺的传输；仅影响验证者 BFT 运行。 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/storage.rs&quot;, &quot;quote&quot;: &quot;    pub fn contains_retrievable_transmission(&amp;self, transmission_id: impl Into&lt;TransmissionID&lt;N&gt;&gt;) -&gt; bool {\n        self.transmissions.contains_retrievable_transmission(transmission_id.into())\n    }&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/storage.rs&quot;, &quot;quote&quot;: &quot;    pub fn contains_aborted_transmission(&amp;self, transmission_id: impl Into&lt;TransmissionID&lt;N&gt;&gt;) -&gt; bool {\n        self.transmissions.contains_aborted_transmission(transmission_id.into())\n    }&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/primary.rs&quot;, &quot;quote&quot;: &quot;                if self.storage.contains_retrievable_transmission(id) || self.storage.contains_aborted_transmission(id)\n                {&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/storage-service/src/memory.rs&quot;, &quot;quote&quot;: &quot;                            if aborted_transmission_ids_lock.contains_key(&amp;transmission_id) {\n                                aborted_transmission_ids.insert(transmission_id);\n                            } else {&quot;}</li>
+<li><strong>已确认 — 稳定性/数据：</strong> 修复：<code>node/bft/src/helpers/storage.rs</code> 的 <code>current_round</code>、<code>current_height</code> 与 <code>gc_round</code> 改为 <code>fetch_max</code> 原子推进，消除并发写入导致的轮次/高度回退与 GC 更新竞态；仅影响验证者 BFT 存储并发路径。 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/storage.rs&quot;, &quot;quote&quot;: &quot;        let previous_value = self.current_round.fetch_max(next_round, Ordering::SeqCst);&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/storage.rs&quot;, &quot;quote&quot;: &quot;        let previous_gc_round = self.gc_round.fetch_max(next_gc_round, Ordering::SeqCst);&quot;} 代码证据：{&quot;path&quot;: &quot;node/bft/src/helpers/storage.rs&quot;, &quot;quote&quot;: &quot;        self.current_height.fetch_max(next_height, Ordering::SeqCst);&quot;}</li>
+</ol>
+<p><strong>待核实的发行说明主张</strong>
+6. <strong>待核实 — 硬分叉/共识：</strong> 发行说明声明主网 V22 共识版本将于高度 22,962,000 激活并要求所有主网验证者与节点运营者在激活高度前升级，未升级节点将面临分叉风险（发行说明原文：「<strong>Mainnet consensus version (V22) activation height: 22,962,000</strong> — estimated Mon 2026-10-19 ~22:00 UTC (~3:00 pm PT) at current block times.」「All mainnet validators and node operators need to upgrade before the activation height.」「Validators and clients that do not upgrade in time will be at risk of forking.」）；本次 <code>snarkOS</code> 差异仅见消息层 V22 登记、指标上报与 snarkVM 版本升级，程序映射上限 31→128 的部署验证规则位于 snarkVM <code>v4.12.0</code> 依赖，目标网最终区块/交易有效性差异缺少本仓库代码证据，需在激活高度前核实并按发行说明安排升级。</p>
+<h5>版本信息</h5>
+<p>发布于 2026-10-13T19:41:26Z · 比较 <code>v4.11.0</code> → <code>v4.12.0</code> · <a href="https://github.com/aleo-labs-protocol/snarkOS/releases/tag/v4.12.0">打开 Release</a></p>
+<h4>v4.12.1 · 正式版 · 完整评估</h4>
+<p>&lt;!-- watch-repo: aleo-labs-protocol/snarkOS --&gt;</p>
+<ul>
+<li><strong>优先摘要（P0/P1、目标网硬分叉或重大 Breaking Changes）：</strong> 无</li>
+<li><strong>处置建议：</strong> 可暂缓 · 不重要</li>
+<li><strong>建议理由：</strong> 未发现需要立即处理的重大变更。</li>
+</ul>
+<h5>AI 审查</h5>
+<p>未发现需要单独报告的重大变更。</p>
+<h5>版本信息</h5>
+<p>发布于 2026-10-31T19:11:51Z · 比较 <code>v4.12.0</code> → <code>v4.12.1</code> · <a href="https://github.com/aleo-labs-protocol/snarkOS/releases/tag/v4.12.1">打开 Release</a></p>
+<hr>
+<p>评估范围：本报告不执行上游程序或测试；每个版本的差异覆盖范围以标题中的“快速预检/完整评估”标识为准。</p>
+</article></main></body></html>
